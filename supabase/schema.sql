@@ -1,0 +1,6 @@
+-- ============================================================================
+-- NOTE : Ce fichier n'est plus utilisé.
+-- SYNERGIA-COMPT utilise maintenant Firebase (Firestore + Auth + Storage).
+--
+-- Voir firestore-schema.md pour la structure des collections Firestore.
+-- ============================================================================

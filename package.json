@@ -1,0 +1,33 @@
+{
+  "name": "synergia-compt",
+  "version": "1.0.0",
+  "private": true,
+  "description": "SYNERGIA-COMPT - Système d'automatisation comptable par IA",
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "firebase": "^11.3.0",
+    "firebase-admin": "^13.0.0",
+    "lucide-react": "^0.468.0",
+    "next": "14.2.21",
+    "pdf-lib": "^1.17.1",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "sharp": "^0.33.5"
+  },
+  "devDependencies": {
+    "@netlify/plugin-nextjs": "^5.9.0",
+    "@types/node": "^22.10.5",
+    "@types/react": "^18.3.18",
+    "@types/react-dom": "^18.3.5",
+    "autoprefixer": "^10.4.20",
+    "postcss": "^8.4.49",
+    "tailwindcss": "^3.4.17",
+    "typescript": "^5.7.3"
+  }
+}
