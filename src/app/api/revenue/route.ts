@@ -22,10 +22,14 @@ export async function GET(request: NextRequest) {
     const month = searchParams.get('month') // YYYY-MM
     const source = searchParams.get('source')
 
-    let query = adminDb
+    const snapshot = await adminDb
       .collection('revenueEntries')
       .where('user_id', '==', decoded.uid)
-      .orderBy('date', 'desc') as FirebaseFirestore.Query
+      .get()
+
+    let entries = snapshot.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''))
 
     if (source) {
       if (!VALID_SOURCES.includes(source)) {
@@ -34,11 +38,8 @@ export async function GET(request: NextRequest) {
           { status: 400 }
         )
       }
-      query = query.where('source', '==', source)
+      entries = entries.filter((e: any) => e.source === source)
     }
-
-    const snapshot = await query.get()
-    let entries = snapshot.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
 
     // Filter by month client-side (Firestore doesn't support range + orderBy on different fields easily)
     if (month) {

@@ -15,6 +15,21 @@ const BOEHME_PCG_JSON = JSON.stringify(
   2
 )
 
+// Revenue PCG accounts for BOEHME
+const REVENUE_PCG = [
+  { code: '70610000', label: 'VENTES ESCAPE GAME' },
+  { code: '70620000', label: 'VENTES QUIZ GAME' },
+  { code: '70630000', label: 'VENTES TEAM BUILDING' },
+  { code: '70640000', label: 'VENTES BONS CADEAUX' },
+  { code: '70710000', label: 'VENTES MARCHANDISES' },
+  { code: '70800000', label: 'PRODUITS ANNEXES' },
+  { code: '74100000', label: 'SUBVENTIONS D\'EXPLOITATION' },
+  { code: '75800000', label: 'PRODUITS DIVERS DE GESTION' },
+  { code: '76200000', label: 'PRODUITS FINANCIERS' },
+  { code: '77100000', label: 'PRODUITS EXCEPTIONNELS' },
+]
+const REVENUE_PCG_JSON = JSON.stringify(REVENUE_PCG, null, 2)
+
 function buildClassificationPrompt(
   lines: ExtractedLine[],
   supplierName: string,
@@ -109,6 +124,60 @@ Quand needs_clarification est true, answer_choices DOIT être un tableau de 2-3 
 ]`
 }
 
+function buildRevenueClassificationPrompt(
+  lines: ExtractedLine[],
+  entityName: string,
+  revenueSource: string | null,
+): string {
+  const linesText = lines
+    .map(
+      (line, i) =>
+        `Ligne ${i + 1}: "${line.description}" - HT: ${line.total_ht}€${line.tva_rate ? ` - TVA: ${line.tva_rate}%` : ''}`
+    )
+    .join('\n')
+
+  const sourceHint = revenueSource ? `\nSource de paiement : ${revenueSource}` : ''
+
+  return `Tu es expert-comptable pour la SARL BOEHME (B.R.A.I.N. Escape Game, Mondeville 14).
+SIRET : 82322711100023 | Activité : Escape games + quiz room + team building.
+
+Ceci est un document de RECETTE (vente/encaissement). Client/émetteur : "${entityName}".${sourceHint}
+
+PLAN COMPTABLE RECETTES BOEHME (codes à 8 chiffres) :
+${REVENUE_PCG_JSON}
+
+Classifie chaque ligne de recette :
+${linesText}
+
+RÈGLES DE CLASSIFICATION RECETTES :
+1. Escape game (sessions, réservations, parties) → 70610000
+2. Quiz game / quiz room → 70620000
+3. Team building / événements entreprise → 70630000
+4. Bons cadeaux / cartes cadeaux / coffrets → 70640000
+5. Ventes de marchandises (goodies, boissons, snacks) → 70710000
+6. Produits annexes (location salle, privatisation) → 70800000
+7. Subventions → 74100000
+8. Remboursements / avoirs fournisseurs → 77100000
+9. Journal : toujours "VE" (Ventes) pour les recettes
+
+Réponds UNIQUEMENT avec le JSON :
+[
+  {
+    "line_index": 0,
+    "pcg_code": "70610000",
+    "pcg_label": "VENTES ESCAPE GAME",
+    "confidence": 0.95,
+    "reasoning": "string",
+    "journal_code": "VE",
+    "is_immobilization": false,
+    "amortization_rate": null,
+    "needs_clarification": false,
+    "question": null,
+    "answer_choices": null
+  }
+]`
+}
+
 function buildReclassifyPrompt(
   line: ExtractedLine,
   supplierName: string,
@@ -192,6 +261,27 @@ export async function POST(request: NextRequest) {
         { success: false, error: 'Aucune ligne à classifier' },
         { status: 400 }
       )
+    }
+
+    // ═══ CHECK: Is this a REVENUE document? ═══
+    const { document_type, revenue_source } = body as { document_type?: string; revenue_source?: string | null }
+    if (document_type === 'revenue') {
+      // Revenue classification — use 70xxx accounts
+      const prompt = buildRevenueClassificationPrompt(lines, supplier_name, revenue_source || null)
+      const response = await anthropic.messages.create({
+        model: CLASSIFICATION_MODEL,
+        max_tokens: MAX_TOKENS,
+        messages: [{ role: 'user', content: prompt }],
+      })
+      const textBlock = response.content.find((block) => block.type === 'text')
+      if (!textBlock || textBlock.type !== 'text') {
+        return NextResponse.json({ success: false, error: "Pas de réponse de l'IA" }, { status: 500 })
+      }
+      let jsonText = textBlock.text.trim()
+      if (jsonText.startsWith('```')) jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+      const classifications: ClassificationResult[] = JSON.parse(jsonText)
+      classifications.forEach(c => { c.classification_method = 'ai' })
+      return NextResponse.json({ success: true, classifications, questions: [] })
     }
 
     // ═══ PRIORITY 1: Auto-classify from saved supplier mappings ═══

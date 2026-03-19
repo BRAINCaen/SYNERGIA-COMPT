@@ -12,10 +12,11 @@ export async function GET(request: NextRequest) {
     const snap = await adminDb
       .collection('bankStatements')
       .where('user_id', '==', decoded.uid)
-      .orderBy('created_at', 'desc')
       .get()
 
-    const statements = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    const statements = snap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''))
 
     return NextResponse.json({ statements })
   } catch (error) {

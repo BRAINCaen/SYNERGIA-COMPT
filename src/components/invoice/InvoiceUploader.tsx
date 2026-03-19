@@ -28,6 +28,7 @@ interface UploadedFile {
   duplicateOf?: string
   autoClassified?: boolean
   knownSupplier?: boolean
+  documentType?: 'expense' | 'revenue'
   questions?: ClarificationQuestion[]
   answers?: Record<number, string>
   extraction?: {
@@ -248,7 +249,9 @@ export default function InvoiceUploader() {
       body: JSON.stringify({
         lines: extraction.lines,
         supplier_name: extraction.supplier?.name || 'Inconnu',
-        ...(supplierAutoClassify ? {
+        document_type: docType,
+        revenue_source: revenueSource,
+        ...(supplierAutoClassify && docType !== 'revenue' ? {
           supplier_auto_classify: true,
           supplier_line_mappings: supplierLineMappings,
         } : {}),
@@ -268,7 +271,7 @@ export default function InvoiceUploader() {
     if (auto_classified || known_supplier) {
       setFiles((prev) =>
         prev.map((f, i) =>
-          i === index ? { ...f, progress: 90, autoClassified: !!auto_classified, knownSupplier: !!known_supplier } : f
+          i === index ? { ...f, progress: 90, autoClassified: !!auto_classified, knownSupplier: !!known_supplier, documentType: docType as 'expense' | 'revenue' } : f
         )
       )
     }
@@ -424,10 +427,12 @@ export default function InvoiceUploader() {
       case 'uploading': return 'Upload en cours...'
       case 'processing': return 'Analyse IA en cours...'
       case 'questions': return "L'IA a besoin de precisions"
-      case 'done':
-        if (f.autoClassified) return 'Classifie automatiquement (fournisseur memorise)'
-        if (f.knownSupplier) return 'Classifie — fournisseur connu BOEHME'
-        return 'Traite avec succes'
+      case 'done': {
+        const typeLabel = f.documentType === 'revenue' ? 'RECETTE' : 'DEPENSE'
+        if (f.autoClassified) return `${typeLabel} — Classifie auto (fournisseur memorise)`
+        if (f.knownSupplier) return `${typeLabel} — Fournisseur connu BOEHME`
+        return `${typeLabel} — Classifie par IA`
+      }
       case 'duplicate': return `Doublon ignore (deja presente : ${f.duplicateOf || ''})`
       case 'error': return 'Erreur'
       default: return 'En attente'
@@ -482,8 +487,15 @@ export default function InvoiceUploader() {
                       f.status === 'questions' ? 'text-accent-orange' :
                       f.status === 'done' ? 'text-accent-green' :
                       f.status === 'error' ? 'text-accent-red' :
+                      f.status === 'duplicate' ? 'text-accent-orange' :
                       'text-gray-500'
                     }`}>
+                      {f.status === 'done' && f.documentType === 'revenue' && (
+                        <span className="inline-flex items-center rounded-full bg-accent-green/20 px-1.5 py-0.5 text-[10px] font-bold text-accent-green mr-1">RECETTE</span>
+                      )}
+                      {f.status === 'done' && f.documentType === 'expense' && (
+                        <span className="inline-flex items-center rounded-full bg-accent-red/20 px-1.5 py-0.5 text-[10px] font-bold text-accent-red mr-1">DEPENSE</span>
+                      )}
                       {(f.knownSupplier || f.autoClassified) && f.status === 'done' && <Zap className="h-3 w-3" />}
                       {getStatusLabel(f)}
                     </span>

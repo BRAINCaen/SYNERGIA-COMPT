@@ -23,26 +23,19 @@ export async function GET(
     const matchStatus = searchParams.get('match_status')
     const type = searchParams.get('type')
 
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    let query: any = adminDb
+    const snap = await adminDb
       .collection('bankTransactions')
       .where('statement_id', '==', params.id)
+      .get()
 
-    if (matchStatus) {
-      query = query.where('match_status', '==', matchStatus)
-    }
-
-    if (type) {
-      query = query.where('type', '==', type)
-    }
-
-    query = query.orderBy('date', 'asc')
-
-    const snap = await query.get()
-    const transactions = snap.docs.map((doc: FirebaseFirestore.QueryDocumentSnapshot) => ({
+    let transactions = snap.docs.map((doc: FirebaseFirestore.QueryDocumentSnapshot) => ({
       id: doc.id,
       ...doc.data(),
-    }))
+    })) as any[]
+
+    if (matchStatus) transactions = transactions.filter(t => t.match_status === matchStatus)
+    if (type) transactions = transactions.filter(t => t.type === type)
+    transactions.sort((a, b) => (a.date || '').localeCompare(b.date || ''))
 
     return NextResponse.json({ transactions })
   } catch (error) {
