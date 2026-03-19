@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb, adminStorage } from '@/lib/firebase/admin'
+import { writeAuditLog } from '@/lib/audit'
 
 export async function GET(
   request: NextRequest,
@@ -65,9 +66,25 @@ export async function PATCH(
     const body = await request.json()
     body.updated_at = new Date().toISOString()
 
+    // Get before state for audit
+    const beforeDoc = await adminDb.collection('invoices').doc(params.id).get()
+    const beforeData = beforeDoc.exists ? beforeDoc.data()! : null
+
     await adminDb.collection('invoices').doc(params.id).update(body)
 
     const updated = await adminDb.collection('invoices').doc(params.id).get()
+
+    // Audit log for any update
+    if (beforeData) {
+      await writeAuditLog({
+        action: 'update',
+        invoice_id: params.id,
+        user_id: decoded.uid,
+        before: { status: beforeData.status, ...Object.fromEntries(Object.keys(body).filter(k => k !== 'updated_at').map(k => [k, beforeData[k]])) },
+        after: Object.fromEntries(Object.keys(body).filter(k => k !== 'updated_at').map(k => [k, body[k]])),
+      })
+    }
+
     return NextResponse.json({ id: updated.id, ...updated.data() })
   } catch (error) {
     console.error('PATCH invoice error:', error)
@@ -104,6 +121,15 @@ export async function DELETE(
       const batch = adminDb.batch()
       linesSnap.docs.forEach((doc) => batch.delete(doc.ref))
       await batch.commit()
+
+      // Audit log for deletion
+      await writeAuditLog({
+        action: 'delete',
+        invoice_id: params.id,
+        user_id: decoded.uid,
+        before: { status: data.status, supplier_name: data.supplier_name, file_name: data.file_name },
+        after: null,
+      })
 
       // Delete invoice
       await adminDb.collection('invoices').doc(params.id).delete()

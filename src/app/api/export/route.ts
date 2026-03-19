@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb } from '@/lib/firebase/admin'
+import { writeAuditLog } from '@/lib/audit'
 
 interface InvoiceData {
   id: string
@@ -104,7 +105,7 @@ export async function POST(request: NextRequest) {
       created_at: new Date().toISOString(),
     })
 
-    // Update invoices status
+    // Update invoices status and write audit logs
     const batch = adminDb.batch()
     for (const id of invoice_ids) {
       batch.update(adminDb.collection('invoices').doc(id), {
@@ -113,6 +114,17 @@ export async function POST(request: NextRequest) {
       })
     }
     await batch.commit()
+
+    // Audit logs for each exported invoice
+    for (const id of invoice_ids) {
+      await writeAuditLog({
+        action: 'export',
+        invoice_id: id,
+        user_id: decoded.uid,
+        before: { status: 'validated' },
+        after: { status: 'exported', format },
+      })
+    }
 
     return new NextResponse(content, {
       headers: {

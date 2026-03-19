@@ -13,6 +13,8 @@ export async function POST(
       return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
     }
 
+    const body = await request.json().catch(() => ({})) as { pdf_url?: string }
+
     const invoiceDoc = await adminDb.collection('invoices').doc(params.id).get()
     if (!invoiceDoc.exists) {
       return NextResponse.json({ error: 'Facture non trouvée' }, { status: 404 })
@@ -27,10 +29,17 @@ export async function POST(
       )
     }
 
-    // Download original PDF from Firebase Storage
-    const bucket = adminStorage.bucket()
-    const [fileBuffer] = await bucket.file(invoice.file_path).download()
-    const pdfBytes = new Uint8Array(fileBuffer)
+    // Download PDF — prefer signed URL from client, fallback to Storage Admin
+    let pdfBytes: Uint8Array
+    if (body.pdf_url) {
+      const pdfRes = await fetch(body.pdf_url)
+      if (!pdfRes.ok) throw new Error(`Erreur téléchargement PDF: ${pdfRes.status}`)
+      pdfBytes = new Uint8Array(await pdfRes.arrayBuffer())
+    } else {
+      const bucket = adminStorage.bucket()
+      const [fileBuffer] = await bucket.file(invoice.file_path).download()
+      pdfBytes = new Uint8Array(fileBuffer)
+    }
 
     // Get lines
     const linesSnap = await adminDb
@@ -45,6 +54,13 @@ export async function POST(
         lineDescription: line.description,
         pcgCode: line.pcg_code,
         pcgLabel: line.pcg_label || '',
+        reasoning: line.reasoning || null,
+        totalHt: line.total_ht || null,
+        tvaRate: line.tva_rate || null,
+        journalCode: line.journal_code || null,
+        confidenceScore: line.confidence_score || null,
+        isImmobilization: line.is_immobilization || false,
+        classificationMethod: line.classification_method || null,
       }))
 
     const annotatedPdf = await annotatePdfWithPCG(pdfBytes, annotations)
@@ -56,7 +72,7 @@ export async function POST(
       },
     })
   } catch (error) {
-    console.error('Annotate error:', error)
-    return NextResponse.json({ error: 'Erreur serveur' }, { status: 500 })
+    console.error('Annotate error:', error instanceof Error ? error.message : error, error instanceof Error ? error.stack : '')
+    return NextResponse.json({ error: `Erreur annotation: ${error instanceof Error ? error.message : 'inconnue'}` }, { status: 500 })
   }
 }

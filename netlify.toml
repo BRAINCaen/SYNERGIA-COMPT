@@ -5,5 +5,8 @@
 [build.environment]
   NODE_VERSION = "20"
 
+[functions]
+  external_node_modules = ["@anthropic-ai/sdk"]
+
 [[plugins]]
   package = "@netlify/plugin-nextjs"

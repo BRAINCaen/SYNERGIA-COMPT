@@ -7,7 +7,7 @@ import {
   signInWithEmailAndPassword,
   createUserWithEmailAndPassword,
 } from 'firebase/auth'
-import { FileText, Loader2 } from 'lucide-react'
+import { Zap, Loader2 } from 'lucide-react'
 
 export default function LoginClient() {
   const [email, setEmail] = useState('')
@@ -31,15 +31,14 @@ export default function LoginClient() {
       router.push('/')
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Une erreur est survenue'
-      // Friendly French error messages
       if (message.includes('wrong-password') || message.includes('invalid-credential')) {
         setError('Email ou mot de passe incorrect')
       } else if (message.includes('user-not-found')) {
-        setError('Aucun compte trouvé avec cet email')
+        setError('Aucun compte trouve avec cet email')
       } else if (message.includes('email-already-in-use')) {
-        setError('Un compte existe déjà avec cet email')
+        setError('Un compte existe deja avec cet email')
       } else if (message.includes('weak-password')) {
-        setError('Le mot de passe doit contenir au moins 6 caractères')
+        setError('Le mot de passe doit contenir au moins 6 caracteres')
       } else if (message.includes('invalid-email')) {
         setError('Adresse email invalide')
       } else {
@@ -51,14 +50,15 @@ export default function LoginClient() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-gradient-to-br from-primary-50 to-primary-100 px-4">
+    <div className="flex min-h-screen items-center justify-center bg-dark-bg px-4">
       <div className="w-full max-w-md">
         <div className="mb-8 text-center">
-          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-primary-600 text-white">
-            <FileText className="h-8 w-8" />
+          <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-2xl bg-accent-green text-dark-bg">
+            <Zap className="h-8 w-8" />
           </div>
-          <h1 className="text-3xl font-bold text-gray-900">SYNERGIA-COMPT</h1>
-          <p className="mt-2 text-sm text-gray-600">
+          <h1 className="text-3xl font-bold text-white">SYNERGIA-COMPT</h1>
+          <p className="mt-1 text-sm text-gray-500">BOEHME — B.R.A.I.N. Escape & Quiz Game</p>
+          <p className="mt-2 text-sm text-gray-400">
             Automatisation comptable par IA
           </p>
         </div>
@@ -66,7 +66,7 @@ export default function LoginClient() {
         <div className="card">
           <form onSubmit={handleSubmit} className="space-y-4">
             <div>
-              <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-700">
+              <label htmlFor="email" className="mb-1 block text-sm font-medium text-gray-300">
                 Email
               </label>
               <input
@@ -81,7 +81,7 @@ export default function LoginClient() {
             </div>
 
             <div>
-              <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-700">
+              <label htmlFor="password" className="mb-1 block text-sm font-medium text-gray-300">
                 Mot de passe
               </label>
               <input
@@ -97,7 +97,7 @@ export default function LoginClient() {
             </div>
 
             {error && (
-              <div className="rounded-lg bg-red-50 p-3 text-sm text-red-700">
+              <div className="rounded-lg bg-accent-red/10 border border-accent-red/30 p-3 text-sm text-accent-red">
                 {error}
               </div>
             )}
@@ -110,7 +110,7 @@ export default function LoginClient() {
               {isLoading ? (
                 <Loader2 className="mr-2 h-4 w-4 animate-spin" />
               ) : null}
-              {mode === 'login' ? 'Se connecter' : 'Créer un compte'}
+              {mode === 'login' ? 'Se connecter' : 'Creer un compte'}
             </button>
           </form>
 
@@ -118,11 +118,11 @@ export default function LoginClient() {
             <button
               type="button"
               onClick={() => setMode(mode === 'login' ? 'signup' : 'login')}
-              className="text-sm text-primary-600 hover:text-primary-700"
+              className="text-sm text-accent-green hover:text-accent-green/80"
             >
               {mode === 'login'
                 ? "Pas encore de compte ? S'inscrire"
-                : 'Déjà un compte ? Se connecter'}
+                : 'Deja un compte ? Se connecter'}
             </button>
           </div>
         </div>

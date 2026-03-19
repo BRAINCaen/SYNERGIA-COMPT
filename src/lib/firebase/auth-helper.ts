@@ -11,7 +11,8 @@ export async function verifyAuth(request: NextRequest) {
   try {
     const decoded = await adminAuth.verifyIdToken(token)
     return decoded
-  } catch {
+  } catch (error) {
+    console.error('Auth verification error:', error)
     return null
   }
 }

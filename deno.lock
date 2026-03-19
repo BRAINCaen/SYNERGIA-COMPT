@@ -12,8 +12,9 @@
     "packageJson": {
       "dependencies": [
         "npm:@anthropic-ai/sdk@0.39",
-        "npm:@netlify/plugin-nextjs@^5.9.0",
+        "npm:@netlify/plugin-nextjs@^5.15.9",
         "npm:@types/node@^22.10.5",
+        "npm:@types/papaparse@^5.5.2",
         "npm:@types/react-dom@^18.3.5",
         "npm:@types/react@^18.3.18",
         "npm:autoprefixer@^10.4.20",
@@ -21,13 +22,15 @@
         "npm:firebase@^11.3.0",
         "npm:lucide-react@0.468",
         "npm:next@14.2.21",
+        "npm:papaparse@^5.5.3",
         "npm:pdf-lib@^1.17.1",
         "npm:postcss@^8.4.49",
         "npm:react-dom@^18.3.1",
         "npm:react@^18.3.1",
         "npm:sharp@~0.33.5",
         "npm:tailwindcss@^3.4.17",
-        "npm:typescript@^5.7.3"
+        "npm:typescript@^5.7.3",
+        "npm:xlsx@~0.18.5"
       ]
     }
   }

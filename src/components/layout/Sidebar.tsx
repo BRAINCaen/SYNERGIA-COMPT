@@ -10,13 +10,17 @@ import {
   Upload,
   Download,
   LogOut,
-  FileSearch,
+  Zap,
+  Landmark,
+  Coins,
 } from 'lucide-react'
 
 const navigation = [
   { name: 'Tableau de bord', href: '/', icon: LayoutDashboard },
   { name: 'Factures', href: '/invoices', icon: FileText },
   { name: 'Upload', href: '/invoices/upload', icon: Upload },
+  { name: 'Releves bancaires', href: '/bank', icon: Landmark },
+  { name: 'Recettes', href: '/revenue', icon: Coins },
   { name: 'Export', href: '/export', icon: Download },
 ]
 
@@ -31,14 +35,14 @@ export default function Sidebar() {
   }
 
   return (
-    <aside className="flex h-screen w-64 flex-col border-r border-gray-200 bg-white">
-      <div className="flex h-16 items-center gap-3 border-b border-gray-200 px-6">
-        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary-600 text-white">
-          <FileSearch className="h-5 w-5" />
+    <aside className="flex h-screen w-64 flex-col border-r border-dark-border bg-dark-card">
+      <div className="flex h-16 items-center gap-3 border-b border-dark-border px-6">
+        <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-accent-green text-dark-bg">
+          <Zap className="h-5 w-5" />
         </div>
         <div>
-          <h1 className="text-lg font-bold text-gray-900">SYNERGIA-COMPT</h1>
-          <p className="text-xs text-gray-500">Automatisation comptable</p>
+          <h1 className="text-lg font-bold text-white">SYNERGIA-COMPT</h1>
+          <p className="text-xs text-gray-500">BOEHME — B.R.A.I.N.</p>
         </div>
       </div>
 
@@ -54,8 +58,8 @@ export default function Sidebar() {
               href={item.href}
               className={`flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
                 isActive
-                  ? 'bg-primary-50 text-primary-700'
-                  : 'text-gray-600 hover:bg-gray-50 hover:text-gray-900'
+                  ? 'bg-accent-green/10 text-accent-green'
+                  : 'text-gray-400 hover:bg-dark-hover hover:text-gray-200'
               }`}
             >
               <item.icon className="h-5 w-5" />
@@ -65,13 +69,13 @@ export default function Sidebar() {
         })}
       </nav>
 
-      <div className="border-t border-gray-200 p-3">
+      <div className="border-t border-dark-border p-3">
         <button
           onClick={handleLogout}
-          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-600 transition-colors hover:bg-red-50 hover:text-red-700"
+          className="flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium text-gray-400 transition-colors hover:bg-accent-red/10 hover:text-accent-red"
         >
           <LogOut className="h-5 w-5" />
-          Déconnexion
+          Deconnexion
         </button>
       </div>
     </aside>

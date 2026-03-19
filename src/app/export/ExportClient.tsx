@@ -85,16 +85,16 @@ export default function ExportClient() {
   }
 
   const formats: { value: ExportFormat; label: string; desc: string }[] = [
-    { value: 'fec', label: 'FEC', desc: 'Fichier des Ecritures Comptables (format légal)' },
-    { value: 'csv', label: 'CSV', desc: 'Tableur compatible Excel (séparateur ;)' },
-    { value: 'json', label: 'JSON', desc: 'Format structuré pour intégration' },
+    { value: 'fec', label: 'FEC', desc: 'Fichier des Ecritures Comptables (format legal)' },
+    { value: 'csv', label: 'CSV', desc: 'Tableur compatible Excel (separateur ;)' },
+    { value: 'json', label: 'JSON', desc: 'Format structure pour integration' },
   ]
 
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-gray-900">Export comptable</h1>
-        <p className="mt-1 text-sm text-gray-500">Exportez vos factures validées au format compatible avec votre cabinet comptable</p>
+        <h1 className="text-2xl font-bold text-white">Export comptable</h1>
+        <p className="mt-1 text-sm text-gray-500">Exportez vos factures validees — FEC, CSV ou JSON</p>
       </div>
 
       <div className="card">
@@ -102,8 +102,8 @@ export default function ExportClient() {
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
           {formats.map((f) => (
             <button key={f.value} onClick={() => setFormat(f.value)}
-              className={`rounded-lg border-2 p-4 text-left transition-colors ${format === f.value ? 'border-primary-500 bg-primary-50' : 'border-gray-200 hover:border-gray-300'}`}>
-              <p className="font-medium text-gray-900">{f.label}</p>
+              className={`rounded-lg border-2 p-4 text-left transition-colors ${format === f.value ? 'border-accent-green bg-accent-green/10' : 'border-dark-border hover:border-gray-500'}`}>
+              <p className="font-medium text-gray-200">{f.label}</p>
               <p className="mt-1 text-xs text-gray-500">{f.desc}</p>
             </button>
           ))}
@@ -111,12 +111,12 @@ export default function ExportClient() {
       </div>
 
       <div className="card p-0">
-        <div className="flex items-center justify-between border-b border-gray-200 px-4 py-3">
+        <div className="flex items-center justify-between border-b border-dark-border px-4 py-3">
           <div className="flex items-center gap-3">
-            <button onClick={selectAll} className="text-gray-400 hover:text-gray-600">
-              {selected.size === invoices.length && invoices.length > 0 ? <CheckSquare className="h-5 w-5 text-primary-600" /> : <Square className="h-5 w-5" />}
+            <button onClick={selectAll} className="text-gray-500 hover:text-gray-300">
+              {selected.size === invoices.length && invoices.length > 0 ? <CheckSquare className="h-5 w-5 text-accent-green" /> : <Square className="h-5 w-5" />}
             </button>
-            <h2 className="text-sm font-semibold text-gray-700">Factures validées ({invoices.length})</h2>
+            <h2 className="text-sm font-semibold text-gray-400">Factures validees ({invoices.length})</h2>
           </div>
           <button onClick={handleExport} disabled={selected.size === 0 || exporting} className="btn-primary">
             {exporting ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <Download className="mr-2 h-4 w-4" />}
@@ -125,24 +125,24 @@ export default function ExportClient() {
         </div>
 
         {loading ? (
-          <div className="flex items-center justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-primary-600" /></div>
+          <div className="flex items-center justify-center p-12"><Loader2 className="h-8 w-8 animate-spin text-accent-green" /></div>
         ) : invoices.length === 0 ? (
           <div className="flex flex-col items-center justify-center p-12 text-gray-500">
-            <FileText className="mb-3 h-12 w-12 text-gray-300" />
-            <p className="text-sm">Aucune facture validée disponible pour l&apos;export</p>
+            <FileText className="mb-3 h-12 w-12 text-gray-600" />
+            <p className="text-sm">Aucune facture validee disponible pour l&apos;export</p>
           </div>
         ) : (
-          <div className="divide-y divide-gray-100">
+          <div className="divide-y divide-dark-border">
             {invoices.map((inv) => (
               <div key={inv.id} onClick={() => toggleSelect(inv.id)}
-                className={`flex cursor-pointer items-center gap-4 px-4 py-3 transition-colors hover:bg-gray-50 ${selected.has(inv.id) ? 'bg-primary-50' : ''}`}>
-                {selected.has(inv.id) ? <CheckSquare className="h-5 w-5 text-primary-600" /> : <Square className="h-5 w-5 text-gray-400" />}
-                <FileText className="h-5 w-5 text-gray-400" />
+                className={`flex cursor-pointer items-center gap-4 px-4 py-3 transition-colors hover:bg-dark-hover ${selected.has(inv.id) ? 'bg-accent-green/5' : ''}`}>
+                {selected.has(inv.id) ? <CheckSquare className="h-5 w-5 text-accent-green" /> : <Square className="h-5 w-5 text-gray-500" />}
+                <FileText className="h-5 w-5 text-gray-500" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-medium text-gray-900">{inv.supplier_name || inv.file_name}</p>
+                  <p className="text-sm font-medium text-gray-200">{inv.supplier_name || inv.file_name}</p>
                   <p className="text-xs text-gray-500">{inv.invoice_number || '-'} &middot; {inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('fr-FR') : '-'}</p>
                 </div>
-                <span className="text-sm font-medium text-gray-900">{formatAmount(inv.total_ttc)}</span>
+                <span className="text-sm font-mono font-medium text-gray-200">{formatAmount(inv.total_ttc)}</span>
               </div>
             ))}
           </div>

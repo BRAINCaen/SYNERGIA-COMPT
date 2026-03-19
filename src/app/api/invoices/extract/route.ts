@@ -2,22 +2,46 @@ import { NextRequest, NextResponse } from 'next/server'
 import anthropic, { EXTRACTION_MODEL, MAX_TOKENS } from '@/lib/anthropic'
 import type { RawExtraction } from '@/types'
 
-const EXTRACTION_PROMPT = `Tu es un expert comptable français. Analyse cette facture et extrais TOUTES les informations dans un format JSON structuré.
+export const runtime = 'edge'
+export const dynamic = 'force-dynamic'
 
-Extrais les informations suivantes :
-1. **Fournisseur** : nom, adresse, SIRET, numéro TVA intracommunautaire, téléphone, email
-2. **Facture** : numéro, date (format YYYY-MM-DD), date d'échéance, conditions de paiement
-3. **Lignes de facture** : pour CHAQUE ligne, extrais description, quantité, prix unitaire HT, total HT, taux TVA (%), montant TVA, total TTC
-4. **Totaux** : total HT, total TVA, total TTC, détail TVA par taux
+const EXTRACTION_PROMPT = `Tu es expert-comptable pour la SARL BOEHME (B.R.A.I.N. Escape Game, Mondeville 14).
+SIRET : 82322711100023.
 
-IMPORTANT :
-- Les montants doivent être des nombres (pas de symboles € ou espaces)
-- Les dates au format YYYY-MM-DD
-- Si une information n'est pas lisible ou absente, utilise null
+Analyse ce document comptable et extrais TOUTES les informations.
+IMPORTANT : Détermine si c'est une DÉPENSE (facture d'achat, nous sommes le client/acheteur) ou une RECETTE (facture de vente, ticket de caisse, reçu TPE, bordereau de remise, avoir, etc. où nous sommes le vendeur/prestataire).
+
+Indices pour RECETTE :
+- BOEHME / B.R.A.I.N. / BRAIN ESCAPE est l'émetteur (vendeur)
+- Ticket de caisse, reçu TPE, bordereau de remise chèques/ANCV, relevé de ventes
+- Encaissement (virement reçu, CB reçu, chèque reçu, ANCV)
+
+Indices pour DÉPENSE :
+- BOEHME / B.R.A.I.N. est le destinataire (acheteur/client)
+- Facture d'un fournisseur, reçu d'achat
+
+Pour les recettes, identifie aussi la source : "tpe_virtuel", "virement", "tpe_sur_place", "cheque", "ancv", "especes" ou null si indéterminé.
+
+Extrais :
+1. **Type** : "expense" ou "revenue"
+2. **Source recette** (si revenue) : tpe_virtuel, virement, tpe_sur_place, cheque, ancv, especes, ou null
+3. **Émetteur/Fournisseur** : nom, adresse, SIRET, TVA intra, téléphone, email
+4. **Document** : numéro, date (YYYY-MM-DD), date d'échéance, conditions de paiement
+5. **Lignes** : description, quantité, prix unitaire HT, total HT, taux TVA (%), montant TVA, total TTC
+6. **Totaux** : total HT, total TVA, total TTC, détail TVA par taux
+
+RÈGLES STRICTES :
+- Montants = nombres (jamais de symboles € ou espaces)
+- Dates au format ISO 8601 YYYY-MM-DD
+- null si information illisible ou absente
 - Pour les taux de TVA, utilise le pourcentage (ex: 20 pour 20%)
+- Vérifier : somme des lignes ≈ total document
+- Si multi-pages, analyser TOUTES les pages
 
 Réponds UNIQUEMENT avec le JSON suivant (pas de texte autour) :
 {
+  "document_type": "expense | revenue",
+  "revenue_source": "tpe_virtuel | virement | tpe_sur_place | cheque | ancv | especes | null",
   "supplier": {
     "name": "string",
     "address": "string | null",
@@ -66,7 +90,11 @@ export async function POST(request: NextRequest) {
     }
 
     const bytes = await file.arrayBuffer()
-    const base64 = Buffer.from(bytes).toString('base64')
+    // Edge-compatible base64 encoding (no Buffer in edge runtime)
+    const uint8 = new Uint8Array(bytes)
+    let binary = ''
+    for (let i = 0; i < uint8.length; i++) binary += String.fromCharCode(uint8[i])
+    const base64 = btoa(binary)
 
     let mediaType: 'image/jpeg' | 'image/png' | 'image/gif' | 'image/webp' = 'image/jpeg'
     if (file.type === 'image/png') mediaType = 'image/png'

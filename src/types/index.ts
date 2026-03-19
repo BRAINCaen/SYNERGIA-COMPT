@@ -1,4 +1,5 @@
 export type InvoiceStatus = 'pending' | 'processing' | 'classified' | 'validated' | 'exported' | 'error'
+export type DocumentType = 'expense' | 'revenue'
 
 export interface Invoice {
   id: string
@@ -6,8 +7,10 @@ export interface Invoice {
   file_name: string
   file_path: string
   file_type: string
+  document_type: DocumentType
   supplier_name: string | null
   supplier_siret: string | null
+  revenue_source: RevenueSource | null
   invoice_number: string | null
   invoice_date: string | null
   due_date: string | null
@@ -37,6 +40,10 @@ export interface InvoiceLine {
   confidence_score: number | null
   manually_corrected: boolean
   journal_code: string | null
+  reasoning: string | null
+  is_immobilization: boolean
+  amortization_rate: number | null
+  classification_method: 'known_supplier' | 'ai' | 'manual' | null
 }
 
 export interface PCGAccount {
@@ -52,7 +59,29 @@ export interface Supplier {
   name: string
   siret: string | null
   default_pcg_code: string | null
+  auto_classify: boolean
+  line_mappings: { description: string; pcg_code: string; pcg_label: string; journal_code: string }[]
   last_used_at: string
+}
+
+export interface AuditLog {
+  id: string
+  action: string
+  invoice_id: string
+  user_id: string
+  before: Record<string, unknown> | null
+  after: Record<string, unknown> | null
+  timestamp: string
+}
+
+export interface AICorrection {
+  id: string
+  supplier_name: string
+  original_account: string
+  corrected_account: string
+  description_keywords: string
+  amount_ht: number
+  created_at: string
 }
 
 export interface ExportRecord {
@@ -67,6 +96,8 @@ export interface ExportRecord {
 export type ExportFormat = 'fec' | 'csv' | 'json' | 'pdf'
 
 export interface RawExtraction {
+  document_type?: 'expense' | 'revenue'
+  revenue_source?: 'tpe_virtuel' | 'virement' | 'tpe_sur_place' | 'cheque' | 'ancv' | 'especes' | null
   supplier: {
     name: string
     address?: string
@@ -108,6 +139,20 @@ export interface ClassificationResult {
   confidence: number
   reasoning: string
   journal_code: string
+  needs_clarification?: boolean
+  question?: string
+  is_immobilization?: boolean
+  amortization_rate?: number | null
+  classification_method?: 'known_supplier' | 'ai' | 'manual'
+  requires_immobilization_check?: boolean
+}
+
+export interface ClarificationQuestion {
+  line_index: number
+  description: string
+  total_ht: number
+  question: string
+  suggested_codes: { code: string; label: string; confidence: number }[]
 }
 
 export interface ExtractionResponse {
@@ -120,4 +165,90 @@ export interface ClassificationResponse {
   success: boolean
   classifications?: ClassificationResult[]
   error?: string
+}
+
+// ── Bank Statements ──────────────────────────────
+
+export type BankStatementFormat = 'csv' | 'xlsx' | 'pdf'
+
+export interface BankStatement {
+  id: string
+  user_id: string
+  file_name: string
+  file_path: string
+  format: BankStatementFormat
+  bank_name: string | null
+  account_number: string | null
+  period_month: string // YYYY-MM
+  transaction_count: number
+  total_debits: number
+  total_credits: number
+  status: 'pending' | 'parsed' | 'reconciling' | 'completed' | 'error'
+  error_message: string | null
+  created_at: string
+  updated_at: string
+}
+
+export type TransactionType = 'debit' | 'credit'
+export type TransactionMatchStatus = 'matched' | 'unmatched' | 'missing_invoice' | 'ignored'
+
+export interface BankTransaction {
+  id: string
+  statement_id: string
+  user_id: string
+  date: string
+  value_date: string | null
+  label: string
+  reference: string | null
+  amount: number
+  type: TransactionType
+  match_status: TransactionMatchStatus
+  matched_invoice_id: string | null
+  matched_revenue_id: string | null
+  match_confidence: number | null
+  match_method: 'auto' | 'manual' | null
+  notes: string | null
+  created_at: string
+}
+
+// ── Revenue / Recettes ───────────────────────────
+
+export type RevenueSource = 'tpe_virtuel' | 'virement' | 'tpe_sur_place' | 'cheque' | 'ancv' | 'especes'
+export type RevenueStatus = 'draft' | 'validated' | 'exported'
+
+export interface RevenueEntry {
+  id: string
+  user_id: string
+  date: string
+  source: RevenueSource
+  description: string
+  amount_ht: number
+  tva_rate: number
+  tva_amount: number
+  amount_ttc: number
+  pcg_code: string
+  pcg_label: string
+  journal_code: string
+  supporting_doc_path: string | null
+  supporting_doc_name: string | null
+  bank_transaction_id: string | null
+  status: RevenueStatus
+  created_at: string
+  updated_at: string
+}
+
+// ── Monthly Alerts ───────────────────────────────
+
+export interface MonthlyAlert {
+  id: string
+  user_id: string
+  month: string // YYYY-MM
+  unmatched_debits: number
+  unmatched_credits: number
+  missing_invoices: number
+  total_transactions: number
+  reconciliation_rate: number // 0-100
+  is_dismissed: boolean
+  created_at: string
+  updated_at: string
 }

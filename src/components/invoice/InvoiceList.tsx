@@ -1,17 +1,38 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge } from '@/components/ui/Badge'
-import { FileText, Search, Filter } from 'lucide-react'
+import { FileText, Search, Filter, ChevronDown, ChevronRight, Calendar, Trash2, X, CheckSquare } from 'lucide-react'
 import type { Invoice, InvoiceStatus } from '@/types'
+
+const MONTH_NAMES = [
+  'Janvier', 'Février', 'Mars', 'Avril', 'Mai', 'Juin',
+  'Juillet', 'Août', 'Septembre', 'Octobre', 'Novembre', 'Décembre',
+]
+
+const STATUS_OPTIONS: { value: InvoiceStatus; label: string }[] = [
+  { value: 'pending', label: 'En attente' },
+  { value: 'processing', label: 'Traitement' },
+  { value: 'classified', label: 'Classifié' },
+  { value: 'validated', label: 'Validé' },
+  { value: 'exported', label: 'Exporté' },
+  { value: 'error', label: 'Erreur' },
+]
 
 export default function InvoiceList() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
   const [search, setSearch] = useState('')
   const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'all'>('all')
+  const [selectedYear, setSelectedYear] = useState<number | null>(null)
+  const [expandedMonths, setExpandedMonths] = useState<Set<number>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null) // null = bulk, string = single id
+  const [bulkStatusValue, setBulkStatusValue] = useState<InvoiceStatus | ''>('')
+  const [actionLoading, setActionLoading] = useState(false)
   const authFetch = useAuthFetch()
 
   useEffect(() => {
@@ -35,15 +56,101 @@ export default function InvoiceList() {
     setLoading(false)
   }
 
-  const filtered = invoices.filter((inv) => {
-    if (!search) return true
-    const q = search.toLowerCase()
-    return (
-      inv.file_name.toLowerCase().includes(q) ||
-      inv.supplier_name?.toLowerCase().includes(q) ||
-      inv.invoice_number?.toLowerCase().includes(q)
-    )
-  })
+  // Filter by search
+  const filtered = useMemo(() => {
+    return invoices.filter((inv) => {
+      if (!search) return true
+      const q = search.toLowerCase()
+      return (
+        inv.file_name.toLowerCase().includes(q) ||
+        inv.supplier_name?.toLowerCase().includes(q) ||
+        inv.invoice_number?.toLowerCase().includes(q)
+      )
+    })
+  }, [invoices, search])
+
+  // Get available years
+  const years = useMemo(() => {
+    const yearSet = new Set<number>()
+    filtered.forEach((inv) => {
+      const date = inv.invoice_date || inv.created_at
+      if (date) {
+        yearSet.add(new Date(date).getFullYear())
+      }
+    })
+    return Array.from(yearSet).sort((a, b) => b - a)
+  }, [filtered])
+
+  // Auto-select current year or most recent
+  useEffect(() => {
+    if (years.length > 0 && selectedYear === null) {
+      const currentYear = new Date().getFullYear()
+      setSelectedYear(years.includes(currentYear) ? currentYear : years[0])
+    }
+  }, [years, selectedYear])
+
+  // Group invoices by month for selected year
+  const invoicesByMonth = useMemo(() => {
+    const grouped: Record<number, Invoice[]> = {}
+    filtered.forEach((inv) => {
+      const date = inv.invoice_date || inv.created_at
+      if (!date) return
+      const d = new Date(date)
+      if (d.getFullYear() !== selectedYear) return
+      const month = d.getMonth()
+      if (!grouped[month]) grouped[month] = []
+      grouped[month].push(inv)
+    })
+    Object.values(grouped).forEach(monthInvoices => {
+      monthInvoices.sort((a, b) => {
+        const da = new Date(a.invoice_date || a.created_at).getTime()
+        const db = new Date(b.invoice_date || b.created_at).getTime()
+        return db - da
+      })
+    })
+    return grouped
+  }, [filtered, selectedYear])
+
+  // Available months (sorted descending)
+  const months = useMemo(() => {
+    return Object.keys(invoicesByMonth)
+      .map(Number)
+      .sort((a, b) => b - a)
+  }, [invoicesByMonth])
+
+  // Auto-expand current month
+  useEffect(() => {
+    const currentMonth = new Date().getMonth()
+    if (months.includes(currentMonth)) {
+      setExpandedMonths(new Set([currentMonth]))
+    } else if (months.length > 0) {
+      setExpandedMonths(new Set([months[0]]))
+    }
+  }, [selectedYear, months])
+
+  // All visible invoice IDs (for select all)
+  const allVisibleIds = useMemo(() => {
+    if (search.length > 0) return filtered.map((inv) => inv.id)
+    const ids: string[] = []
+    months.forEach((month) => {
+      if (expandedMonths.has(month)) {
+        (invoicesByMonth[month] || []).forEach((inv) => ids.push(inv.id))
+      }
+    })
+    return ids
+  }, [filtered, search, months, expandedMonths, invoicesByMonth])
+
+  const toggleMonth = (month: number) => {
+    setExpandedMonths((prev) => {
+      const next = new Set(prev)
+      if (next.has(month)) {
+        next.delete(month)
+      } else {
+        next.add(month)
+      }
+      return next
+    })
+  }
 
   const formatDate = (date: string | null) => {
     if (!date) return '-'
@@ -55,8 +162,114 @@ export default function InvoiceList() {
     return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount)
   }
 
+  const getMonthTotal = (monthInvoices: Invoice[]) => {
+    const total = monthInvoices.reduce((sum, inv) => sum + (inv.total_ttc || 0), 0)
+    return formatAmount(total)
+  }
+
+  // Selection handlers
+  const toggleSelect = useCallback((id: string) => {
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      if (next.has(id)) {
+        next.delete(id)
+      } else {
+        next.add(id)
+      }
+      return next
+    })
+  }, [])
+
+  const toggleSelectAll = useCallback(() => {
+    setSelectedIds((prev) => {
+      const allSelected = allVisibleIds.every((id) => prev.has(id))
+      if (allSelected) {
+        return new Set()
+      }
+      return new Set(allVisibleIds)
+    })
+  }, [allVisibleIds])
+
+  const clearSelection = useCallback(() => {
+    setSelectedIds(new Set())
+  }, [])
+
+  // Delete handlers
+  const confirmDelete = (id?: string) => {
+    setDeleteTarget(id || null)
+    setShowDeleteConfirm(true)
+  }
+
+  const cancelDelete = () => {
+    setShowDeleteConfirm(false)
+    setDeleteTarget(null)
+  }
+
+  const executeDelete = async () => {
+    setActionLoading(true)
+    try {
+      if (deleteTarget) {
+        // Single delete
+        const res = await authFetch(`/api/invoices/${deleteTarget}`, { method: 'DELETE' })
+        if (res.ok) {
+          setInvoices((prev) => prev.filter((inv) => inv.id !== deleteTarget))
+          setSelectedIds((prev) => {
+            const next = new Set(prev)
+            next.delete(deleteTarget)
+            return next
+          })
+        }
+      } else {
+        // Bulk delete
+        const ids = Array.from(selectedIds)
+        const res = await authFetch('/api/invoices/batch', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ action: 'delete', invoice_ids: ids }),
+        })
+        if (res.ok) {
+          setInvoices((prev) => prev.filter((inv) => !selectedIds.has(inv.id)))
+          setSelectedIds(new Set())
+        }
+      }
+    } catch (e) {
+      console.error('Delete error:', e)
+    }
+    setActionLoading(false)
+    setShowDeleteConfirm(false)
+    setDeleteTarget(null)
+  }
+
+  // Bulk status change
+  const executeBulkStatusChange = async (status: InvoiceStatus) => {
+    if (selectedIds.size === 0) return
+    setActionLoading(true)
+    try {
+      const ids = Array.from(selectedIds)
+      const res = await authFetch('/api/invoices/batch', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ action: 'update_status', invoice_ids: ids, status }),
+      })
+      if (res.ok) {
+        setInvoices((prev) =>
+          prev.map((inv) => (selectedIds.has(inv.id) ? { ...inv, status } : inv))
+        )
+        setSelectedIds(new Set())
+        setBulkStatusValue('')
+      }
+    } catch (e) {
+      console.error('Bulk status change error:', e)
+    }
+    setActionLoading(false)
+  }
+
+  const isSearching = search.length > 0
+  const allVisibleSelected = allVisibleIds.length > 0 && allVisibleIds.every((id) => selectedIds.has(id))
+
   return (
     <div className="space-y-4">
+      {/* Search + Filter */}
       <div className="flex flex-wrap items-center gap-3">
         <div className="relative flex-1 min-w-[200px]">
           <Search className="absolute left-3 top-2.5 h-4 w-4 text-gray-400" />
@@ -86,48 +299,299 @@ export default function InvoiceList() {
         </div>
       </div>
 
-      <div className="overflow-hidden rounded-xl border border-gray-200 bg-white">
-        {loading ? (
-          <div className="flex items-center justify-center p-12">
-            <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
-          </div>
-        ) : filtered.length === 0 ? (
-          <div className="flex flex-col items-center justify-center p-12 text-gray-500">
-            <FileText className="mb-3 h-12 w-12 text-gray-300" />
-            <p className="text-sm">Aucune facture trouvée</p>
-          </div>
-        ) : (
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-gray-200 bg-gray-50">
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Fichier</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Fournisseur</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">N° Facture</th>
-                <th className="px-4 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Date</th>
-                <th className="px-4 py-3 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Montant TTC</th>
-                <th className="px-4 py-3 text-center text-xs font-medium uppercase tracking-wider text-gray-500">Statut</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-gray-200">
-              {filtered.map((invoice) => (
-                <tr key={invoice.id} className="transition-colors hover:bg-gray-50">
-                  <td className="px-4 py-3">
-                    <Link href={`/invoices/${invoice.id}`} className="flex items-center gap-2 text-sm font-medium text-primary-600 hover:text-primary-700">
-                      <FileText className="h-4 w-4" />
-                      <span className="max-w-[200px] truncate">{invoice.file_name}</span>
-                    </Link>
-                  </td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{invoice.supplier_name || '-'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-700">{invoice.invoice_number || '-'}</td>
-                  <td className="px-4 py-3 text-sm text-gray-500">{formatDate(invoice.invoice_date)}</td>
-                  <td className="px-4 py-3 text-right text-sm font-medium text-gray-900">{formatAmount(invoice.total_ttc)}</td>
-                  <td className="px-4 py-3 text-center"><StatusBadge status={invoice.status} /></td>
-                </tr>
+      {/* Floating action bar when items selected */}
+      {selectedIds.size > 0 && (
+        <div className="sticky top-2 z-30 flex items-center gap-3 rounded-xl border border-accent-green/30 bg-accent-green/10 px-4 py-3 shadow-lg">
+          <CheckSquare className="h-5 w-5 text-accent-green" />
+          <span className="text-sm font-semibold text-accent-green">
+            {selectedIds.size} facture{selectedIds.size > 1 ? 's' : ''} sélectionnée{selectedIds.size > 1 ? 's' : ''}
+          </span>
+          <div className="mx-2 h-5 w-px bg-primary-200" />
+          <button
+            onClick={() => confirmDelete()}
+            disabled={actionLoading}
+            className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Supprimer
+          </button>
+          <div className="flex items-center gap-2">
+            <select
+              value={bulkStatusValue}
+              onChange={(e) => {
+                const val = e.target.value as InvoiceStatus
+                if (val) {
+                  setBulkStatusValue(val)
+                  executeBulkStatusChange(val)
+                }
+              }}
+              disabled={actionLoading}
+              className="input-field w-auto text-sm py-1.5"
+            >
+              <option value="">Changer le statut...</option>
+              {STATUS_OPTIONS.map((opt) => (
+                <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
-            </tbody>
-          </table>
-        )}
-      </div>
+            </select>
+          </div>
+          <div className="flex-1" />
+          <button
+            onClick={clearSelection}
+            className="flex items-center gap-1 rounded-lg px-2 py-1.5 text-sm text-accent-green hover:bg-accent-green/10 transition-colors"
+          >
+            <X className="h-3.5 w-3.5" />
+            Désélectionner
+          </button>
+        </div>
+      )}
+
+      {loading ? (
+        <div className="flex items-center justify-center p-12">
+          <div className="h-8 w-8 animate-spin rounded-full border-2 border-primary-600 border-t-transparent" />
+        </div>
+      ) : isSearching ? (
+        /* Flat search results */
+        <div className="overflow-hidden rounded-xl border border-dark-border bg-dark-card">
+          {filtered.length === 0 ? (
+            <div className="flex flex-col items-center justify-center p-12 text-gray-500">
+              <Search className="mb-3 h-12 w-12 text-gray-300" />
+              <p className="text-sm">Aucun résultat pour &quot;{search}&quot;</p>
+            </div>
+          ) : (
+            <>
+              <div className="border-b border-dark-border bg-dark-input px-4 py-2">
+                <p className="text-xs text-gray-500">{filtered.length} résultat{filtered.length > 1 ? 's' : ''}</p>
+              </div>
+              <InvoiceTable
+                invoices={filtered}
+                formatDate={formatDate}
+                formatAmount={formatAmount}
+                selectedIds={selectedIds}
+                onToggleSelect={toggleSelect}
+                onToggleSelectAll={toggleSelectAll}
+                allSelected={allVisibleSelected}
+                onDeleteSingle={confirmDelete}
+              />
+            </>
+          )}
+        </div>
+      ) : (
+        /* Year/Month view */
+        <div className="space-y-4">
+          {/* Year buttons */}
+          {years.length > 0 && (
+            <div className="flex items-center gap-2">
+              <Calendar className="h-4 w-4 text-gray-400" />
+              {years.map((year) => (
+                <button
+                  key={year}
+                  onClick={() => setSelectedYear(year)}
+                  className={`rounded-lg px-4 py-2 text-sm font-semibold transition-colors ${
+                    selectedYear === year
+                      ? 'bg-accent-green text-dark-bg shadow-sm'
+                      : 'bg-dark-card text-gray-300 border border-dark-border hover:bg-dark-hover'
+                  }`}
+                >
+                  {year}
+                </button>
+              ))}
+            </div>
+          )}
+
+          {/* Months accordion */}
+          {months.length === 0 ? (
+            <div className="flex flex-col items-center justify-center rounded-xl border border-dark-border bg-dark-card p-12 text-gray-500">
+              <FileText className="mb-3 h-12 w-12 text-gray-300" />
+              <p className="text-sm">Aucune facture pour {selectedYear}</p>
+            </div>
+          ) : (
+            <div className="space-y-2">
+              {months.map((month) => {
+                const monthInvoices = invoicesByMonth[month] || []
+                const isExpanded = expandedMonths.has(month)
+                const validatedCount = monthInvoices.filter(i => i.status === 'validated' || i.status === 'exported').length
+
+                return (
+                  <div key={month} className="overflow-hidden rounded-xl border border-dark-border bg-dark-card">
+                    {/* Month header */}
+                    <button
+                      onClick={() => toggleMonth(month)}
+                      className="flex w-full items-center justify-between px-4 py-3 text-left hover:bg-dark-hover transition-colors"
+                    >
+                      <div className="flex items-center gap-3">
+                        {isExpanded ? (
+                          <ChevronDown className="h-4 w-4 text-gray-400" />
+                        ) : (
+                          <ChevronRight className="h-4 w-4 text-gray-400" />
+                        )}
+                        <span className="text-sm font-semibold text-gray-200">{MONTH_NAMES[month]}</span>
+                        <span className="rounded-full bg-dark-border px-2 py-0.5 text-xs font-medium text-gray-400">
+                          {monthInvoices.length} facture{monthInvoices.length > 1 ? 's' : ''}
+                        </span>
+                        {validatedCount > 0 && (
+                          <span className="rounded-full bg-accent-green/10 px-2 py-0.5 text-xs font-medium text-accent-green">
+                            {validatedCount} validée{validatedCount > 1 ? 's' : ''}
+                          </span>
+                        )}
+                      </div>
+                      <span className="text-sm font-bold text-gray-400">{getMonthTotal(monthInvoices)}</span>
+                    </button>
+
+                    {/* Month invoices */}
+                    {isExpanded && (
+                      <InvoiceTable
+                        invoices={monthInvoices}
+                        formatDate={formatDate}
+                        formatAmount={formatAmount}
+                        selectedIds={selectedIds}
+                        onToggleSelect={toggleSelect}
+                        onToggleSelectAll={() => {
+                          const monthIds = monthInvoices.map((inv) => inv.id)
+                          setSelectedIds((prev) => {
+                            const allMonthSelected = monthIds.every((id) => prev.has(id))
+                            const next = new Set(prev)
+                            if (allMonthSelected) {
+                              monthIds.forEach((id) => next.delete(id))
+                            } else {
+                              monthIds.forEach((id) => next.add(id))
+                            }
+                            return next
+                          })
+                        }}
+                        allSelected={monthInvoices.every((inv) => selectedIds.has(inv.id))}
+                        onDeleteSingle={confirmDelete}
+                      />
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Delete confirmation dialog */}
+      {showDeleteConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={cancelDelete}>
+          <div
+            className="w-full max-w-md rounded-2xl bg-dark-card border border-dark-border p-6 shadow-xl"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="flex items-center gap-3 mb-4">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-red/10">
+                <Trash2 className="h-5 w-5 text-accent-red" />
+              </div>
+              <h3 className="text-lg font-semibold text-gray-200">Confirmer la suppression</h3>
+            </div>
+            <p className="text-sm text-gray-400 mb-6">
+              {deleteTarget
+                ? 'Voulez-vous vraiment supprimer cette facture ? Cette action est irréversible.'
+                : `Voulez-vous vraiment supprimer ${selectedIds.size} facture${selectedIds.size > 1 ? 's' : ''} ? Cette action est irréversible.`}
+            </p>
+            <div className="flex items-center justify-end gap-3">
+              <button
+                onClick={cancelDelete}
+                disabled={actionLoading}
+                className="btn-secondary"
+              >
+                Annuler
+              </button>
+              <button
+                onClick={executeDelete}
+                disabled={actionLoading}
+                className="flex items-center gap-2 rounded-lg bg-red-600 px-4 py-2 text-sm font-medium text-white hover:bg-red-700 transition-colors disabled:opacity-50"
+              >
+                {actionLoading && <div className="h-4 w-4 animate-spin rounded-full border-2 border-white border-t-transparent" />}
+                Supprimer
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
+  )
+}
+
+function InvoiceTable({
+  invoices,
+  formatDate,
+  formatAmount,
+  selectedIds,
+  onToggleSelect,
+  onToggleSelectAll,
+  allSelected,
+  onDeleteSingle,
+}: {
+  invoices: Invoice[]
+  formatDate: (d: string | null) => string
+  formatAmount: (a: number | null) => string
+  selectedIds: Set<string>
+  onToggleSelect: (id: string) => void
+  onToggleSelectAll: () => void
+  allSelected: boolean
+  onDeleteSingle: (id: string) => void
+}) {
+  return (
+    <table className="w-full">
+      <thead>
+        <tr className="border-b border-dark-border bg-dark-input">
+          <th className="w-10 px-3 py-2">
+            <input
+              type="checkbox"
+              checked={allSelected && invoices.length > 0}
+              onChange={onToggleSelectAll}
+              className="h-4 w-4 rounded border-gray-300 text-accent-green focus:ring-primary-500 cursor-pointer"
+            />
+          </th>
+          <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Fichier</th>
+          <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Fournisseur</th>
+          <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">N° Facture</th>
+          <th className="px-4 py-2 text-left text-xs font-medium uppercase tracking-wider text-gray-500">Date</th>
+          <th className="px-4 py-2 text-right text-xs font-medium uppercase tracking-wider text-gray-500">Montant TTC</th>
+          <th className="px-4 py-2 text-center text-xs font-medium uppercase tracking-wider text-gray-500">Statut</th>
+          <th className="w-10 px-2 py-2"></th>
+        </tr>
+      </thead>
+      <tbody className="divide-y divide-dark-border">
+        {invoices.map((invoice) => {
+          const isSelected = selectedIds.has(invoice.id)
+          return (
+            <tr key={invoice.id} className={`transition-colors hover:bg-dark-hover ${isSelected ? 'bg-primary-50' : ''}`}>
+              <td className="w-10 px-3 py-3">
+                <input
+                  type="checkbox"
+                  checked={isSelected}
+                  onChange={() => onToggleSelect(invoice.id)}
+                  className="h-4 w-4 rounded border-gray-300 text-accent-green focus:ring-primary-500 cursor-pointer"
+                />
+              </td>
+              <td className="px-4 py-3">
+                <Link href={`/invoices/${invoice.id}`} className="flex items-center gap-2 text-sm font-medium text-accent-green hover:text-accent-green">
+                  <FileText className="h-4 w-4 flex-shrink-0" />
+                  <span className="max-w-[200px] truncate">{invoice.file_name}</span>
+                </Link>
+              </td>
+              <td className="px-4 py-3 text-sm text-gray-400">{invoice.supplier_name || '-'}</td>
+              <td className="px-4 py-3 text-sm text-gray-400">{invoice.invoice_number || '-'}</td>
+              <td className="px-4 py-3 text-sm text-gray-500">{formatDate(invoice.invoice_date)}</td>
+              <td className="px-4 py-3 text-right text-sm font-medium text-gray-200">{formatAmount(invoice.total_ttc)}</td>
+              <td className="px-4 py-3 text-center"><StatusBadge status={invoice.status} /></td>
+              <td className="w-10 px-2 py-3">
+                <button
+                  onClick={(e) => {
+                    e.stopPropagation()
+                    onDeleteSingle(invoice.id)
+                  }}
+                  className="rounded-lg p-1.5 text-gray-400 hover:bg-accent-red/10 hover:text-accent-red transition-colors"
+                  title="Supprimer cette facture"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </button>
+              </td>
+            </tr>
+          )
+        })}
+      </tbody>
+    </table>
   )
 }

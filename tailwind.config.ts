@@ -9,19 +9,37 @@ const config: Config = {
   theme: {
     extend: {
       colors: {
-        primary: {
-          50: '#eff6ff',
-          100: '#dbeafe',
-          200: '#bfdbfe',
-          300: '#93c5fd',
-          400: '#60a5fa',
-          500: '#3b82f6',
-          600: '#2563eb',
-          700: '#1d4ed8',
-          800: '#1e40af',
-          900: '#1e3a8a',
-          950: '#172554',
+        // Dark theme BOEHME
+        dark: {
+          bg: '#0D1117',
+          card: '#161B22',
+          input: '#21262D',
+          border: '#30363D',
+          hover: '#292E36',
         },
+        accent: {
+          green: '#00C896',
+          orange: '#FF8C42',
+          red: '#FF3B30',
+          blue: '#58A6FF',
+        },
+        primary: {
+          50: '#0D1117',
+          100: '#161B22',
+          200: '#21262D',
+          300: '#30363D',
+          400: '#58A6FF',
+          500: '#00C896',
+          600: '#00C896',
+          700: '#00B384',
+          800: '#009E74',
+          900: '#008A64',
+          950: '#006F50',
+        },
+      },
+      fontFamily: {
+        mono: ['IBM Plex Mono', 'Menlo', 'Monaco', 'monospace'],
+        sans: ['IBM Plex Sans', 'Inter', 'system-ui', 'sans-serif'],
       },
     },
   },

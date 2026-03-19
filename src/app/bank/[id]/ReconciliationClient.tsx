@@ -1,0 +1,593 @@
+'use client'
+
+import { useState, useEffect } from 'react'
+import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
+import AppLayout from '@/components/layout/AppLayout'
+import { useRouter } from 'next/navigation'
+import {
+  Landmark,
+  Check,
+  X,
+  AlertTriangle,
+  Search,
+  Link,
+  Unlink,
+  FileText,
+  ArrowUpRight,
+  ArrowDownRight,
+  Loader2,
+  Trash2,
+} from 'lucide-react'
+
+type TransactionStatus = 'matched' | 'unmatched' | 'ignored'
+type FilterTab = 'all' | 'unmatched' | 'matched' | 'debits' | 'credits'
+
+interface MatchedEntity {
+  id: string
+  type: 'invoice' | 'revenue'
+  name: string
+  amount: number
+  date: string
+}
+
+interface Transaction {
+  id: string
+  date: string
+  label: string
+  debit: number | null
+  credit: number | null
+  status: TransactionStatus
+  matched_entity?: MatchedEntity | null
+}
+
+interface StatementInfo {
+  id: string
+  file_name: string
+  period_month: string
+  total_debits: number
+  total_credits: number
+  transaction_count: number
+}
+
+interface MatchCandidate {
+  id: string
+  type: 'invoice' | 'revenue'
+  name: string
+  supplier?: string
+  amount: number
+  date: string
+}
+
+export default function ReconciliationClient({ statementId }: { statementId: string }) {
+  const { user, loading: authLoading } = useAuth()
+  const authFetch = useAuthFetch()
+  const router = useRouter()
+
+  const [statement, setStatement] = useState<StatementInfo | null>(null)
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [loading, setLoading] = useState(true)
+  const [activeTab, setActiveTab] = useState<FilterTab>('all')
+  const [matchModalTx, setMatchModalTx] = useState<Transaction | null>(null)
+  const [searchQuery, setSearchQuery] = useState('')
+  const [searchResults, setSearchResults] = useState<MatchCandidate[]>([])
+  const [searching, setSearching] = useState(false)
+  const [autoReconciling, setAutoReconciling] = useState(false)
+
+  useEffect(() => {
+    if (authLoading) return
+    if (!user) {
+      router.push('/login')
+      return
+    }
+    fetchData()
+  }, [user, authLoading])
+
+  const fetchData = async () => {
+    try {
+      const res = await authFetch(`/api/bank-statements/${statementId}`)
+      if (res.ok) {
+        const data = await res.json()
+        setStatement(data.statement)
+        setTransactions(data.transactions || [])
+      }
+    } catch (e) {
+      console.error('Fetch error:', e)
+    }
+    setLoading(false)
+  }
+
+  const fmt = (n: number) =>
+    new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n)
+
+  const matchedCount = transactions.filter((t) => t.status === 'matched').length
+  const totalCount = transactions.length
+  const matchPercent = totalCount > 0 ? Math.round((matchedCount / totalCount) * 100) : 0
+
+  const filteredTransactions = transactions.filter((t) => {
+    switch (activeTab) {
+      case 'unmatched':
+        return t.status === 'unmatched'
+      case 'matched':
+        return t.status === 'matched'
+      case 'debits':
+        return t.debit != null && t.debit > 0
+      case 'credits':
+        return t.credit != null && t.credit > 0
+      default:
+        return true
+    }
+  })
+
+  const tabs: { key: FilterTab; label: string; count?: number }[] = [
+    { key: 'all', label: 'Tous', count: totalCount },
+    {
+      key: 'unmatched',
+      label: 'Non rapproches',
+      count: transactions.filter((t) => t.status === 'unmatched').length,
+    },
+    { key: 'matched', label: 'Rapproches', count: matchedCount },
+    {
+      key: 'debits',
+      label: 'Debits',
+      count: transactions.filter((t) => t.debit != null && t.debit > 0).length,
+    },
+    {
+      key: 'credits',
+      label: 'Credits',
+      count: transactions.filter((t) => t.credit != null && t.credit > 0).length,
+    },
+  ]
+
+  const handleAutoReconcile = async () => {
+    setAutoReconciling(true)
+    try {
+      const res = await authFetch(`/api/bank-statements/${statementId}/reconcile`, {
+        method: 'POST',
+      })
+      if (res.ok) {
+        await fetchData()
+      }
+    } catch (e) {
+      console.error('Auto reconcile error:', e)
+    }
+    setAutoReconciling(false)
+  }
+
+  const handleIgnore = async (txId: string) => {
+    try {
+      const res = await authFetch(`/api/bank-statements/${statementId}/transactions/${txId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'ignored' }),
+      })
+      if (res.ok) {
+        setTransactions((prev) =>
+          prev.map((t) => (t.id === txId ? { ...t, status: 'ignored' as const, matched_entity: null } : t))
+        )
+      }
+    } catch (e) {
+      console.error('Ignore error:', e)
+    }
+  }
+
+  const handleUnmatch = async (txId: string) => {
+    try {
+      const res = await authFetch(`/api/bank-statements/${statementId}/transactions/${txId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: 'unmatched', matched_entity: null }),
+      })
+      if (res.ok) {
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.id === txId ? { ...t, status: 'unmatched' as const, matched_entity: null } : t
+          )
+        )
+      }
+    } catch (e) {
+      console.error('Unmatch error:', e)
+    }
+  }
+
+  const openMatchModal = (tx: Transaction) => {
+    setMatchModalTx(tx)
+    setSearchQuery('')
+    setSearchResults([])
+  }
+
+  const handleSearch = async (query: string) => {
+    setSearchQuery(query)
+    if (query.length < 2) {
+      setSearchResults([])
+      return
+    }
+
+    setSearching(true)
+    try {
+      const params = new URLSearchParams({ q: query, statement_id: statementId })
+      if (matchModalTx) {
+        const amount = matchModalTx.debit || matchModalTx.credit || 0
+        params.set('amount', String(amount))
+      }
+      const res = await authFetch(`/api/bank-statements/match-search?${params.toString()}`)
+      if (res.ok) {
+        const data = await res.json()
+        setSearchResults(data.results || [])
+      }
+    } catch (e) {
+      console.error('Search error:', e)
+    }
+    setSearching(false)
+  }
+
+  const confirmMatch = async (candidate: MatchCandidate) => {
+    if (!matchModalTx) return
+
+    try {
+      const res = await authFetch(
+        `/api/bank-statements/${statementId}/transactions/${matchModalTx.id}`,
+        {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            status: 'matched',
+            matched_entity: {
+              id: candidate.id,
+              type: candidate.type,
+              name: candidate.name,
+              amount: candidate.amount,
+              date: candidate.date,
+            },
+          }),
+        }
+      )
+      if (res.ok) {
+        setTransactions((prev) =>
+          prev.map((t) =>
+            t.id === matchModalTx.id
+              ? {
+                  ...t,
+                  status: 'matched' as const,
+                  matched_entity: {
+                    id: candidate.id,
+                    type: candidate.type,
+                    name: candidate.name,
+                    amount: candidate.amount,
+                    date: candidate.date,
+                  },
+                }
+              : t
+          )
+        )
+        setMatchModalTx(null)
+      }
+    } catch (e) {
+      console.error('Match error:', e)
+    }
+  }
+
+  const statusIcon = (status: TransactionStatus) => {
+    switch (status) {
+      case 'matched':
+        return <Check className="h-4 w-4 text-accent-green" />
+      case 'unmatched':
+        return <AlertTriangle className="h-4 w-4 text-accent-orange" />
+      case 'ignored':
+        return <X className="h-4 w-4 text-gray-500" />
+    }
+  }
+
+  if (authLoading || loading) {
+    return (
+      <AppLayout>
+        <div className="flex h-96 items-center justify-center">
+          <Loader2 className="h-8 w-8 animate-spin text-accent-green" />
+        </div>
+      </AppLayout>
+    )
+  }
+
+  if (!statement) {
+    return (
+      <AppLayout>
+        <div className="flex h-96 flex-col items-center justify-center gap-3">
+          <AlertTriangle className="h-8 w-8 text-accent-red" />
+          <p className="text-sm text-gray-500">Releve introuvable.</p>
+          <button onClick={() => router.push('/bank')} className="btn-secondary text-sm">
+            Retour
+          </button>
+        </div>
+      </AppLayout>
+    )
+  }
+
+  return (
+    <AppLayout>
+      <div className="space-y-6">
+        {/* Header */}
+        <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex items-center gap-3">
+            <button
+              onClick={() => router.push('/bank')}
+              className="rounded-lg p-2 text-gray-400 hover:bg-dark-hover hover:text-gray-200 transition-colors"
+            >
+              <Landmark className="h-5 w-5" />
+            </button>
+            <div>
+              <h1 className="text-xl font-bold text-white">{statement.file_name}</h1>
+              <div className="flex items-center gap-3 mt-0.5">
+                <span className="text-sm text-gray-500">Periode : {statement.period_month}</span>
+                <span className="text-sm font-mono text-accent-red">{fmt(statement.total_debits)} debits</span>
+                <span className="text-sm font-mono text-accent-green">{fmt(statement.total_credits)} credits</span>
+              </div>
+            </div>
+          </div>
+          <button
+            onClick={handleAutoReconcile}
+            disabled={autoReconciling}
+            className="btn-primary flex items-center gap-2 disabled:opacity-50"
+          >
+            {autoReconciling ? (
+              <Loader2 className="h-4 w-4 animate-spin" />
+            ) : (
+              <Link className="h-4 w-4" />
+            )}
+            Lancer le rapprochement auto
+          </button>
+        </div>
+
+        {/* Summary bar */}
+        <div className="card">
+          <div className="flex items-center justify-between mb-2">
+            <p className="text-sm text-gray-400">
+              Rapproches : <span className="font-mono font-medium text-white">{matchedCount}</span> /{' '}
+              <span className="font-mono">{totalCount}</span>{' '}
+              <span className="text-accent-green font-medium">({matchPercent}%)</span>
+            </p>
+          </div>
+          <div className="h-2 w-full overflow-hidden rounded-full bg-dark-input">
+            <div
+              className="h-full rounded-full bg-accent-green transition-all duration-700"
+              style={{ width: `${matchPercent}%` }}
+            />
+          </div>
+        </div>
+
+        {/* Filter tabs */}
+        <div className="flex flex-wrap gap-2">
+          {tabs.map((tab) => (
+            <button
+              key={tab.key}
+              onClick={() => setActiveTab(tab.key)}
+              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                activeTab === tab.key
+                  ? 'bg-accent-green/10 text-accent-green'
+                  : 'bg-dark-card text-gray-400 hover:bg-dark-hover hover:text-gray-200'
+              }`}
+            >
+              {tab.label}
+              {tab.count != null && (
+                <span className="ml-1.5 font-mono text-xs opacity-70">{tab.count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+
+        {/* Transactions table */}
+        <div className="card overflow-x-auto p-0">
+          <table className="w-full text-sm">
+            <thead>
+              <tr className="border-b border-dark-border text-left">
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Date
+                </th>
+                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Libelle
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Debit
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Credit
+                </th>
+                <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Statut
+                </th>
+                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  Action
+                </th>
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-dark-border">
+              {filteredTransactions.length > 0 ? (
+                filteredTransactions.map((tx) => (
+                  <tr key={tx.id} className="hover:bg-dark-hover transition-colors">
+                    <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-gray-300">
+                      {tx.date
+                        ? new Date(tx.date).toLocaleDateString('fr-FR')
+                        : '-'}
+                    </td>
+                    <td className="max-w-xs truncate px-4 py-3 text-gray-200">
+                      <div>
+                        <p className="truncate">{tx.label}</p>
+                        {tx.status === 'matched' && tx.matched_entity && (
+                          <button
+                            onClick={() => {
+                              const path =
+                                tx.matched_entity!.type === 'invoice'
+                                  ? `/invoices/${tx.matched_entity!.id}`
+                                  : `/revenue/${tx.matched_entity!.id}`
+                              router.push(path)
+                            }}
+                            className="mt-0.5 flex items-center gap-1 text-xs text-accent-green hover:underline"
+                          >
+                            <FileText className="h-3 w-3" />
+                            {tx.matched_entity.name}
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-sm">
+                      {tx.debit != null && tx.debit > 0 ? (
+                        <span className="text-accent-red">{fmt(tx.debit)}</span>
+                      ) : (
+                        <span className="text-gray-600">-</span>
+                      )}
+                    </td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-sm">
+                      {tx.credit != null && tx.credit > 0 ? (
+                        <span className="text-accent-green">{fmt(tx.credit)}</span>
+                      ) : (
+                        <span className="text-gray-600">-</span>
+                      )}
+                    </td>
+                    <td className="px-4 py-3 text-center">{statusIcon(tx.status)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        {tx.status === 'unmatched' && (
+                          <>
+                            <button
+                              onClick={() => openMatchModal(tx)}
+                              className="rounded px-2 py-1 text-xs font-medium text-accent-blue hover:bg-accent-blue/10 transition-colors"
+                            >
+                              Pointer
+                            </button>
+                            <button
+                              onClick={() => handleIgnore(tx.id)}
+                              className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-dark-hover hover:text-gray-300 transition-colors"
+                            >
+                              Ignorer
+                            </button>
+                          </>
+                        )}
+                        {tx.status === 'matched' && (
+                          <button
+                            onClick={() => handleUnmatch(tx.id)}
+                            className="rounded p-1 text-gray-500 hover:bg-accent-red/10 hover:text-accent-red transition-colors"
+                            title="Dissocier"
+                          >
+                            <Unlink className="h-3.5 w-3.5" />
+                          </button>
+                        )}
+                        {tx.status === 'ignored' && (
+                          <button
+                            onClick={() => handleUnmatch(tx.id)}
+                            className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-dark-hover hover:text-gray-300 transition-colors"
+                          >
+                            Restaurer
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6} className="px-4 py-8 text-center text-sm text-gray-500">
+                    Aucune transaction pour ce filtre.
+                  </td>
+                </tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {/* Manual match modal */}
+      {matchModalTx && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-lg rounded-xl border border-dark-border bg-dark-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-dark-border px-6 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-white">Pointer la transaction</h3>
+                <p className="mt-0.5 text-sm text-gray-500 truncate max-w-sm">
+                  {matchModalTx.label}
+                </p>
+                <p className="text-xs font-mono text-gray-400 mt-0.5">
+                  {matchModalTx.debit
+                    ? `Debit : ${fmt(matchModalTx.debit)}`
+                    : `Credit : ${fmt(matchModalTx.credit || 0)}`}{' '}
+                  &middot;{' '}
+                  {matchModalTx.date
+                    ? new Date(matchModalTx.date).toLocaleDateString('fr-FR')
+                    : '-'}
+                </p>
+              </div>
+              <button
+                onClick={() => setMatchModalTx(null)}
+                className="rounded-lg p-1.5 text-gray-400 hover:bg-dark-hover hover:text-gray-200"
+              >
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+
+            <div className="p-6 space-y-4">
+              {/* Search input */}
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  placeholder="Rechercher une facture ou un revenu..."
+                  className="input-field w-full pl-10 text-sm"
+                  autoFocus
+                />
+                {searching && (
+                  <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gray-500" />
+                )}
+              </div>
+
+              {/* Results */}
+              <div className="max-h-64 space-y-2 overflow-y-auto">
+                {searchResults.length > 0 ? (
+                  searchResults.map((candidate) => (
+                    <button
+                      key={`${candidate.type}-${candidate.id}`}
+                      onClick={() => confirmMatch(candidate)}
+                      className="w-full rounded-lg border border-dark-border bg-dark-input p-3 text-left transition-all hover:border-accent-green/50 hover:bg-accent-green/5"
+                    >
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2 min-w-0">
+                          {candidate.type === 'invoice' ? (
+                            <ArrowDownRight className="h-4 w-4 shrink-0 text-accent-red" />
+                          ) : (
+                            <ArrowUpRight className="h-4 w-4 shrink-0 text-accent-green" />
+                          )}
+                          <div className="min-w-0">
+                            <p className="truncate text-sm font-medium text-gray-200">
+                              {candidate.name}
+                            </p>
+                            {candidate.supplier && (
+                              <p className="text-xs text-gray-500">{candidate.supplier}</p>
+                            )}
+                          </div>
+                        </div>
+                        <div className="shrink-0 text-right ml-3">
+                          <p className="font-mono text-sm font-medium text-gray-200">
+                            {fmt(candidate.amount)}
+                          </p>
+                          <p className="text-xs text-gray-500">
+                            {candidate.date
+                              ? new Date(candidate.date).toLocaleDateString('fr-FR')
+                              : '-'}
+                          </p>
+                        </div>
+                      </div>
+                    </button>
+                  ))
+                ) : searchQuery.length >= 2 && !searching ? (
+                  <p className="py-6 text-center text-sm text-gray-500">Aucun resultat.</p>
+                ) : (
+                  <p className="py-6 text-center text-sm text-gray-500">
+                    Tapez au moins 2 caracteres pour rechercher.
+                  </p>
+                )}
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </AppLayout>
+  )
+}
