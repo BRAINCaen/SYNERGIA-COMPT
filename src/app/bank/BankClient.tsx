@@ -180,7 +180,7 @@ export default function BankClient() {
       }
 
       // Step 4: Split text into chunks and send each to API
-      const CHUNK_SIZE = 28000
+      const CHUNK_SIZE = 12000
       const chunks: string[] = []
       for (let i = 0; i < fullText.length; i += CHUNK_SIZE) {
         chunks.push(fullText.substring(i, i + CHUNK_SIZE))

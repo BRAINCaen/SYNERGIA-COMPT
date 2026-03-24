@@ -18,12 +18,11 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Texte trop court' }, { status: 400 })
     }
 
-    // Send the text chunk (client handles splitting if needed)
-    const chunk = text.substring(0, 30000) // Allow bigger chunks
+    const chunk = text.substring(0, 14000)
 
     const response = await anthropic.messages.create({
       model: FAST_MODEL,
-      max_tokens: 16384,
+      max_tokens: 8192,
       messages: [{
         role: 'user',
         content: `Extrais TOUTES les transactions de ce relevé bancaire. Il peut y avoir beaucoup de transactions sur plusieurs pages.
