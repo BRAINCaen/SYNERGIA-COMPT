@@ -143,7 +143,11 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
         })),
       }),
     })
-    if (res.ok) await fetchInvoice()
+    if (res.ok) {
+      await fetchInvoice()
+      // Auto-generate annotated PDF on validation
+      handleAnnotate()
+    }
     setSaving(false)
   }
 
@@ -151,7 +155,10 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     if (!fileUrl || !invoice) return
     setAnnotating(true)
     try {
-      const pdfRes = await fetch(fileUrl)
+      // Use proxy to avoid CORS issues with Firebase Storage
+      const proxyUrl = `/api/proxy-pdf?url=${encodeURIComponent(fileUrl)}`
+      const pdfRes = await authFetch(proxyUrl)
+      if (!pdfRes.ok) throw new Error('Failed to download PDF')
       const pdfBytes = new Uint8Array(await pdfRes.arrayBuffer())
       const pdfDoc = await PDFDocument.load(pdfBytes)
 
