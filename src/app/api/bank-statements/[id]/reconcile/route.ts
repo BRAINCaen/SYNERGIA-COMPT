@@ -78,7 +78,7 @@ export async function POST(
           // Match against pre-loaded invoices by amount (within 0.01 EUR)
           const invoicesSnap = { docs: allInvoicesSnap.docs.filter(d => {
             const ttc = d.data().total_ttc
-            return ttc != null && Math.abs(ttc - txn.amount) <= 0.01
+            return ttc != null && Math.abs(ttc - txn.amount) <= 0.02
           })}
 
           // Filter by status and date proximity
@@ -137,7 +137,7 @@ export async function POST(
           // Match against pre-loaded revenue entries by amount
           const revenueSnap = { docs: allRevenueSnap.docs.filter(d => {
             const ttc = d.data().amount_ttc
-            return ttc != null && Math.abs(ttc - txn.amount) <= 0.01
+            return ttc != null && Math.abs(ttc - txn.amount) <= 0.02
           })}
 
           // Filter by date proximity

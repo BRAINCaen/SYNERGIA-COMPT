@@ -558,11 +558,35 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
             </div>
           ) : (() => {
             const bankSearch = (document.getElementById('bank-match-search') as HTMLInputElement)?.value?.toLowerCase() || ''
-            const ttc = invoice.total_ttc || 0
+            const ttc = invoice?.total_ttc || 0
+            // All target amounts: total TTC + each line amount (total_ht, total_ttc)
+            const targetAmounts: { label: string; amount: number }[] = [
+              { label: `Total TTC`, amount: ttc },
+            ]
+            for (const ln of lines) {
+              if (ln.total_ht && ln.total_ht > 0) {
+                targetAmounts.push({ label: ln.description?.substring(0, 30) || `Ligne`, amount: ln.total_ht })
+              }
+              if (ln.total_ttc && ln.total_ttc > 0 && ln.total_ttc !== ln.total_ht) {
+                targetAmounts.push({ label: `${(ln.description || 'Ligne').substring(0, 25)} TTC`, amount: ln.total_ttc })
+              }
+            }
+            const allAmounts = targetAmounts.map(t => t.amount)
+
             const matchingTx = bankTransactions
-              .filter((tx: any) => Math.abs(tx.amount - ttc) <= 1)
-              .sort((a: any, b: any) => Math.abs(a.amount - ttc) - Math.abs(b.amount - ttc))
-            const otherTx = bankTransactions.filter((tx: any) => Math.abs(tx.amount - ttc) > 1)
+              .filter((tx: any) => allAmounts.some(a => Math.abs(tx.amount - a) <= 0.01))
+              .sort((a: any, b: any) => {
+                const aDist = Math.min(...allAmounts.map(am => Math.abs(a.amount - am)))
+                const bDist = Math.min(...allAmounts.map(am => Math.abs(b.amount - am)))
+                return aDist - bDist
+              })
+            const otherTx = bankTransactions
+              .filter((tx: any) => !allAmounts.some(a => Math.abs(tx.amount - a) <= 0.01))
+              .sort((a: any, b: any) => {
+                const aDist = Math.min(...allAmounts.map(am => Math.abs(a.amount - am)))
+                const bDist = Math.min(...allAmounts.map(am => Math.abs(b.amount - am)))
+                return aDist - bDist
+              })
             const allSorted = [...matchingTx, ...otherTx]
             const filtered = bankSearch
               ? allSorted.filter((tx: any) => (tx.label || '').toLowerCase().includes(bankSearch))
@@ -570,26 +594,31 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
 
             return (
               <>
+                {/* Target amounts badges */}
+                <div className="flex flex-wrap items-center gap-2 text-xs">
+                  <span className="text-gray-500">Montants recherches :</span>
+                  {targetAmounts.map((t, i) => (
+                    <span key={i} className={`rounded px-1.5 py-0.5 font-mono ${i === 0 ? 'bg-accent-green/10 text-accent-green' : 'bg-accent-blue/10 text-accent-blue'}`}>
+                      {t.label}: {t.amount.toFixed(2)}€
+                    </span>
+                  ))}
+                </div>
+
                 <div className="relative">
                   <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
                   <input
                     id="bank-match-search"
                     type="text"
                     placeholder="Rechercher par libelle..."
-                    onChange={() => {
-                      // Force re-render by toggling a dummy state
-                      setBankTransactions([...bankTransactions])
-                    }}
+                    onChange={() => setBankTransactions([...bankTransactions])}
                     className="input-field w-full pl-9 text-sm"
                   />
                 </div>
 
                 {matchingTx.length > 0 && (
-                  <div>
-                    <p className="text-xs font-medium text-accent-green mb-2">
-                      Montants correspondants ({formatAmount(ttc)} +/- 1 EUR)
-                    </p>
-                  </div>
+                  <p className="text-xs font-medium text-accent-green">
+                    {matchingTx.length} transaction(s) avec montant exact (+/- 0.01€)
+                  </p>
                 )}
 
                 <div className="max-h-64 space-y-1 overflow-y-auto">
@@ -597,7 +626,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                     <p className="py-6 text-center text-sm text-gray-500">Aucune transaction non rapprochee trouvee.</p>
                   )}
                   {filtered.map((tx: any) => {
-                    const isMatch = Math.abs(tx.amount - ttc) <= 1
+                    const isMatch = allAmounts.some((a: number) => Math.abs(tx.amount - a) <= 0.01)
                     return (
                       <button
                         key={tx.id}
