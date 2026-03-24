@@ -345,7 +345,11 @@ export default function ReconciliationClient({ statementId }: { statementId: str
       const tx = transactions.find(t => t.id === id)
       return sum + (tx?.debit || tx?.credit || 0)
     }, 0)
-    authFetch(`/api/invoices/search?amount=${totalAmount}`)
+    // Detect if selected transactions are debits or credits
+    const selectedTxTypes = selectedTxIds.map(id => transactions.find(t => t.id === id))
+    const isCredit = selectedTxTypes.some(tx => tx?.credit && tx.credit > 0)
+    const txTypeParam = isCredit ? 'credit' : 'debit'
+    authFetch(`/api/invoices/search?amount=${totalAmount}&type=${txTypeParam}`)
       .then(res => res.ok ? res.json() : { invoices: [] })
       .then(data => {
         const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
@@ -369,7 +373,8 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     // Auto-load ALL invoices sorted by closest amount
     try {
       const amount = tx.debit || tx.credit || 0
-      const res = await authFetch(`/api/invoices/search?amount=${amount}`)
+      const txType = tx.debit ? 'debit' : 'credit'
+      const res = await authFetch(`/api/invoices/search?amount=${amount}&type=${txType}`)
       if (res.ok) {
         const data = await res.json()
         const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
@@ -397,6 +402,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
       if (matchModalTx) {
         const amount = matchModalTx.debit || matchModalTx.credit || 0
         params.set('amount', String(amount))
+        params.set('type', matchModalTx.debit ? 'debit' : 'credit')
       }
       const res = await authFetch(`/api/invoices/search?${params.toString()}`)
       if (res.ok) {
@@ -956,7 +962,8 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                     setSearching(true)
                     try {
                       const totalAmt = selectedTxIds.reduce((s, id) => { const tx = transactions.find(t => t.id === id); return s + (tx?.debit || tx?.credit || 0) }, 0)
-                      const params = new URLSearchParams({ amount: String(totalAmt) })
+                      const isCreditTx = selectedTxIds.some(id => { const tx = transactions.find(t => t.id === id); return tx?.credit && tx.credit > 0 })
+                      const params = new URLSearchParams({ amount: String(totalAmt), type: isCreditTx ? 'credit' : 'debit' })
                       if (q.length >= 1) params.set('q', q)
                       const res = await authFetch(`/api/invoices/search?${params}`)
                       if (res.ok) {
