@@ -99,11 +99,13 @@ export default function PersonnelClient() {
       }
     } catch { /* */ }
     setLoading(false)
-  }, [user, selectedMonth, authFetch])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, selectedMonth])
 
   useEffect(() => {
     if (!authLoading && user) fetchPayslips()
-  }, [authLoading, user, fetchPayslips])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [authLoading, user, selectedMonth])
 
   useEffect(() => {
     if (!authLoading && !user) router.push('/login')
