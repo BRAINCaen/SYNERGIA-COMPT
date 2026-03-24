@@ -13,6 +13,7 @@ import {
   Zap,
   Landmark,
   Coins,
+  Users,
 } from 'lucide-react'
 
 const navigation = [
@@ -21,6 +22,7 @@ const navigation = [
   { name: 'Upload', href: '/invoices/upload', icon: Upload },
   { name: 'Releves bancaires', href: '/bank', icon: Landmark },
   { name: 'Recettes', href: '/revenue', icon: Coins },
+  { name: 'Personnel', href: '/personnel', icon: Users },
   { name: 'Export', href: '/export', icon: Download },
 ]
 

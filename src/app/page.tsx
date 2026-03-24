@@ -8,7 +8,7 @@ import AppLayout from '@/components/layout/AppLayout'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import {
-  FileText, Upload, CheckCircle, Download, Clock, AlertTriangle, Loader2, Zap, TrendingUp, Landmark, Coins,
+  FileText, Upload, CheckCircle, Download, Clock, AlertTriangle, Loader2, Zap, TrendingUp, Landmark, Coins, Users,
 } from 'lucide-react'
 
 interface AlertData {
@@ -49,6 +49,7 @@ export default function DashboardPage() {
   const [stats, setStats] = useState<Stats | null>(null)
   const [recent, setRecent] = useState<RecentInvoice[]>([])
   const [alerts, setAlerts] = useState<AlertData[]>([])
+  const [unmatchedCount, setUnmatchedCount] = useState(0)
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -62,9 +63,10 @@ export default function DashboardPage() {
 
   const fetchDashboard = async () => {
     try {
-      const [statsRes, alertsRes] = await Promise.all([
+      const [statsRes, alertsRes, unmatchedRes] = await Promise.all([
         authFetch('/api/invoices/stats'),
         authFetch('/api/alerts').catch(() => null),
+        authFetch('/api/bank-statements/transactions?match_status=unmatched').catch(() => null),
       ])
       if (statsRes.ok) {
         const data = await statsRes.json()
@@ -74,6 +76,11 @@ export default function DashboardPage() {
       if (alertsRes?.ok) {
         const alertData = await alertsRes.json()
         if (alertData.alerts) setAlerts(alertData.alerts.filter((a: AlertData) => !a.is_dismissed && a.total_transactions > 0))
+      }
+      if (unmatchedRes?.ok) {
+        const unmatchedData = await unmatchedRes.json()
+        const txList = Array.isArray(unmatchedData) ? unmatchedData : unmatchedData.transactions || []
+        setUnmatchedCount(txList.length)
       }
     } catch (e) {
       console.error('Dashboard fetch error:', e)
@@ -178,6 +185,18 @@ export default function DashboardPage() {
           )
         })}
 
+        {unmatchedCount > 0 && (
+          <div className="flex items-center gap-3 rounded-lg border border-purple-500/30 bg-purple-500/10 p-4">
+            <Users className="h-5 w-5 text-purple-400" />
+            <p className="text-sm text-purple-300">
+              <span className="font-mono font-bold text-purple-400">{unmatchedCount}</span> ligne{unmatchedCount > 1 ? 's' : ''} de releve non rapprochee{unmatchedCount > 1 ? 's' : ''}.{' '}
+              <Link href="/bank" className="font-medium underline">Voir le releve</Link>
+              {' '}&middot;{' '}
+              <Link href="/personnel" className="font-medium underline">Frais de personnel</Link>
+            </p>
+          </div>
+        )}
+
         {(stats?.error || 0) > 0 && (
           <div className="flex items-center gap-3 rounded-lg border border-accent-red/30 bg-accent-red/10 p-4">
             <AlertTriangle className="h-5 w-5 text-accent-red" />
@@ -212,7 +231,7 @@ export default function DashboardPage() {
           </Link>
         </div>
 
-        <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+        <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
           <Link href="/bank" className="card flex items-center gap-4 transition-all hover:border-accent-blue/50 hover:shadow-lg hover:shadow-accent-blue/5">
             <div className="rounded-xl bg-accent-blue/10 p-3 text-accent-blue"><Landmark className="h-6 w-6" /></div>
             <div>
@@ -225,6 +244,13 @@ export default function DashboardPage() {
             <div>
               <p className="font-medium text-white">Recettes</p>
               <p className="text-sm text-gray-500">TPE, virements, cheques, ANCV</p>
+            </div>
+          </Link>
+          <Link href="/personnel" className="card flex items-center gap-4 transition-all hover:border-purple-500/50 hover:shadow-lg hover:shadow-purple-500/5">
+            <div className="rounded-xl bg-purple-500/10 p-3 text-purple-400"><Users className="h-6 w-6" /></div>
+            <div>
+              <p className="font-medium text-white">Frais de personnel</p>
+              <p className="text-sm text-gray-500">Salaires, acomptes, charges</p>
             </div>
           </Link>
         </div>

@@ -237,6 +237,37 @@ export interface RevenueEntry {
   updated_at: string
 }
 
+// ── Personnel / Payroll ─────────────────────────────
+
+export interface Employee {
+  id: string
+  user_id: string
+  name: string
+  role: string | null
+  monthly_gross: number | null
+  is_active: boolean
+  created_at: string
+}
+
+export interface Payslip {
+  id: string
+  user_id: string
+  employee_id: string
+  employee_name: string
+  month: string // YYYY-MM
+  gross_salary: number
+  net_salary: number
+  employer_charges: number
+  advance_amount: number // acompte
+  remaining_salary: number // solde = net - advance
+  file_path: string | null
+  file_name: string | null
+  status: 'draft' | 'validated'
+  matched_transaction_ids: string[] // bank transaction IDs matched to this payslip
+  created_at: string
+  updated_at: string
+}
+
 // ── Monthly Alerts ───────────────────────────────
 
 export interface MonthlyAlert {
