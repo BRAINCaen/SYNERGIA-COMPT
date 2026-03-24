@@ -1,825 +1,328 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
-import { useAuthFetch } from '@/lib/firebase/auth-context'
+import { useState, useEffect, useCallback } from 'react'
+import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import AppLayout from '@/components/layout/AppLayout'
+import { useRouter } from 'next/navigation'
 import {
-  Users,
-  Plus,
-  Check,
-  Trash2,
-  Pencil,
-  Upload,
-  Download,
-  FileText,
-  Link2,
-  Loader2,
-  X,
-  AlertCircle,
-  UserPlus,
+  Users, Upload, FileText, Loader2, Trash2, Check, AlertTriangle,
 } from 'lucide-react'
-import type { Payslip, Employee, BankTransaction } from '@/types'
 
-// ── Helpers ──────────────────────────────────────────
-function currentMonth(): string {
-  const d = new Date()
-  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
-}
-
-function generateMonths(): string[] {
-  const months: string[] = []
-  const now = new Date()
-  for (let i = 0; i < 24; i++) {
-    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
-    months.push(`${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`)
-  }
-  return months
-}
-
-function formatAmount(amount: number | null): string {
-  if (amount == null) return '-'
-  return new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(amount)
-}
-
-const STATUS_STYLES: Record<string, string> = {
-  draft: 'bg-gray-500/20 text-gray-400 border-gray-500/30',
-  validated: 'bg-green-500/20 text-green-400 border-green-500/30',
-}
-const STATUS_LABELS: Record<string, string> = {
-  draft: 'Brouillon',
-  validated: 'Valide',
-}
-
-// ── Form defaults ───────────────────────────────────
-interface PayslipForm {
-  employee_id: string
+interface PayslipData {
   employee_name: string
+  employee_role: string | null
+  period: string
+  gross_salary: number
+  net_salary_before_tax: number
+  net_salary_after_tax: number
+  employer_charges: number
+  employee_charges: number
+  advance_amount: number
+  remaining_to_pay: number
+  hours_worked: number | null
+  overtime_hours: number | null
+  bonuses: { label: string; amount: number }[]
+  deductions: { label: string; amount: number }[]
+  employer_name: string
+  contract_type: string | null
+  paid_leave_balance: number | null
+  cumul_brut_annuel: number | null
+  cumul_net_imposable: number | null
+}
+
+interface Payslip {
+  id: string
+  employee_name: string
+  employee_role: string | null
   month: string
-  gross_salary: string
-  net_salary: string
-  employer_charges: string
-  advance_amount: string
-  file: File | null
+  gross_salary: number
+  net_salary: number
+  net_after_tax: number
+  employer_charges: number
+  employee_charges: number
+  advance_amount: number
+  remaining_salary: number
+  file_name: string | null
+  status: string
+  contract_type: string | null
+  bonuses: { label: string; amount: number }[]
+  created_at: string
 }
 
-interface EmployeeForm {
-  name: string
-  role: string
-  monthly_gross: string
+interface UploadingFile {
+  file: File
+  status: 'uploading' | 'extracting' | 'extracted' | 'saving' | 'done' | 'error'
+  progress: number
+  data?: PayslipData
+  error?: string
 }
 
-// ── Component ───────────────────────────────────────
-export default function PersonnelClient() {
-  const authFetch = useAuthFetch()
-  const [payslips, setPayslips] = useState<Payslip[]>([])
-  const [employees, setEmployees] = useState<Employee[]>([])
-  const [unmatchedTransactions, setUnmatchedTransactions] = useState<BankTransaction[]>([])
-  const [loading, setLoading] = useState(true)
-  const [month, setMonth] = useState(currentMonth)
-  const [employeeFilter, setEmployeeFilter] = useState<string>('all')
-  const [showPayslipForm, setShowPayslipForm] = useState(false)
-  const [showEmployeeForm, setShowEmployeeForm] = useState(false)
-  const [editingId, setEditingId] = useState<string | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [matchingPayslipId, setMatchingPayslipId] = useState<string | null>(null)
-  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([])
-  const [matchSaving, setMatchSaving] = useState(false)
+const fmt = (n: number) => n.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 }) + ' \u20AC'
 
-  const emptyPayslipForm: PayslipForm = {
-    employee_id: '',
-    employee_name: '',
-    month: month,
-    gross_salary: '',
-    net_salary: '',
-    employer_charges: '',
-    advance_amount: '0',
-    file: null,
+const MONTHS = [
+  'janvier', 'fevrier', 'mars', 'avril', 'mai', 'juin',
+  'juillet', 'aout', 'septembre', 'octobre', 'novembre', 'decembre'
+]
+
+function getMonthOptions() {
+  const opts = []
+  const now = new Date()
+  for (let i = 0; i < 12; i++) {
+    const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+    const val = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}`
+    const label = `${MONTHS[d.getMonth()]} ${d.getFullYear()}`
+    opts.push({ value: val, label })
   }
-  const [payslipForm, setPayslipForm] = useState<PayslipForm>(emptyPayslipForm)
+  return opts
+}
 
-  const emptyEmployeeForm: EmployeeForm = { name: '', role: '', monthly_gross: '' }
-  const [employeeForm, setEmployeeForm] = useState<EmployeeForm>(emptyEmployeeForm)
+export default function PersonnelClient() {
+  const { user, loading: authLoading } = useAuth()
+  const authFetch = useAuthFetch()
+  const router = useRouter()
 
-  // Fetch data
-  useEffect(() => {
-    fetchAll()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [month])
+  const monthOptions = getMonthOptions()
+  const [selectedMonth, setSelectedMonth] = useState(monthOptions[0].value)
+  const [payslips, setPayslips] = useState<Payslip[]>([])
+  const [loading, setLoading] = useState(true)
+  const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([])
+  const [isDragOver, setIsDragOver] = useState(false)
 
-  const fetchAll = async () => {
+  const fetchPayslips = useCallback(async () => {
+    if (!user) return
     setLoading(true)
     try {
-      const [payslipsRes, employeesRes, txRes] = await Promise.all([
-        authFetch(`/api/payslips?month=${month}`),
-        authFetch('/api/employees'),
-        authFetch(`/api/bank-statements/transactions?month=${month}&match_status=unmatched`).catch(() => null),
-      ])
-      if (payslipsRes.ok) {
-        const data = await payslipsRes.json()
-        setPayslips(data)
+      const res = await authFetch(`/api/payslips?month=${selectedMonth}`)
+      if (res.ok) {
+        const data = await res.json()
+        setPayslips(Array.isArray(data) ? data : data.payslips || [])
       }
-      if (employeesRes.ok) {
-        const data = await employeesRes.json()
-        setEmployees(data)
-      }
-      if (txRes?.ok) {
-        const data = await txRes.json()
-        setUnmatchedTransactions(Array.isArray(data) ? data : data.transactions || [])
-      }
-    } catch (e) {
-      console.error('Fetch personnel error:', e)
-    }
+    } catch { /* */ }
     setLoading(false)
-  }
+  }, [user, selectedMonth, authFetch])
 
-  // Computed remaining
-  const computedRemaining = useMemo(() => {
-    const net = parseFloat(payslipForm.net_salary) || 0
-    const advance = parseFloat(payslipForm.advance_amount) || 0
-    return net - advance
-  }, [payslipForm.net_salary, payslipForm.advance_amount])
+  useEffect(() => {
+    if (!authLoading && user) fetchPayslips()
+  }, [authLoading, user, fetchPayslips])
 
-  // Filtered payslips
-  const filtered = useMemo(() => {
-    if (employeeFilter === 'all') return payslips
-    return payslips.filter((p) => p.employee_id === employeeFilter || p.employee_name === employeeFilter)
-  }, [payslips, employeeFilter])
+  useEffect(() => {
+    if (!authLoading && !user) router.push('/login')
+  }, [authLoading, user, router])
 
-  // Totals
-  const totals = useMemo(() => {
-    return filtered.reduce(
-      (acc, p) => ({
-        gross: acc.gross + p.gross_salary,
-        net: acc.net + p.net_salary,
-        charges: acc.charges + p.employer_charges,
-        advance: acc.advance + p.advance_amount,
-        remaining: acc.remaining + p.remaining_salary,
-      }),
-      { gross: 0, net: 0, charges: 0, advance: 0, remaining: 0 }
-    )
-  }, [filtered])
+  const processFile = async (file: File, index: number) => {
+    setUploadingFiles(prev => prev.map((f, i) => i === index ? { ...f, status: 'extracting', progress: 30 } : f))
 
-  // ── Payslip form handlers ─────────────────────────
-  const openAddPayslip = () => {
-    setEditingId(null)
-    setPayslipForm({ ...emptyPayslipForm, month })
-    setShowPayslipForm(true)
-  }
+    const extractForm = new FormData()
+    extractForm.append('file', file)
 
-  const openEditPayslip = (p: Payslip) => {
-    setEditingId(p.id)
-    setPayslipForm({
-      employee_id: p.employee_id || '',
-      employee_name: p.employee_name,
-      month: p.month,
-      gross_salary: String(p.gross_salary),
-      net_salary: String(p.net_salary),
-      employer_charges: String(p.employer_charges),
-      advance_amount: String(p.advance_amount),
-      file: null,
-    })
-    setShowPayslipForm(true)
-  }
-
-  const closePayslipForm = () => {
-    setShowPayslipForm(false)
-    setEditingId(null)
-    setPayslipForm(emptyPayslipForm)
-  }
-
-  const handleSavePayslip = async () => {
-    setSaving(true)
     try {
-      if (editingId) {
-        // PATCH existing
-        const res = await authFetch(`/api/payslips/${editingId}`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            employee_id: payslipForm.employee_id || null,
-            employee_name: payslipForm.employee_name,
-            month: payslipForm.month,
-            gross_salary: parseFloat(payslipForm.gross_salary) || 0,
-            net_salary: parseFloat(payslipForm.net_salary) || 0,
-            employer_charges: parseFloat(payslipForm.employer_charges) || 0,
-            advance_amount: parseFloat(payslipForm.advance_amount) || 0,
-          }),
-        })
-        if (res.ok) {
-          closePayslipForm()
-          await fetchAll()
-        }
-      } else {
-        // POST new with file
-        const body = new FormData()
-        body.append('employee_id', payslipForm.employee_id)
-        body.append('employee_name', payslipForm.employee_name)
-        body.append('month', payslipForm.month)
-        body.append('gross_salary', payslipForm.gross_salary)
-        body.append('net_salary', payslipForm.net_salary)
-        body.append('employer_charges', payslipForm.employer_charges)
-        body.append('advance_amount', payslipForm.advance_amount || '0')
-        if (payslipForm.file) body.append('file', payslipForm.file)
-
-        const res = await authFetch('/api/payslips', { method: 'POST', body })
-        if (res.ok) {
-          closePayslipForm()
-          await fetchAll()
-        }
-      }
-    } catch (e) {
-      console.error('Save payslip error:', e)
-    }
-    setSaving(false)
-  }
-
-  const handleValidatePayslip = async (id: string) => {
-    try {
-      const res = await authFetch(`/api/payslips/${id}`, {
-        method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ status: 'validated' }),
+      const extractRes = await authFetch('/api/payslips/extract', {
+        method: 'POST',
+        body: extractForm,
       })
-      if (res.ok) await fetchAll()
+
+      if (!extractRes.ok) {
+        const err = await extractRes.json().catch(() => ({ error: 'Erreur extraction' }))
+        setUploadingFiles(prev => prev.map((f, i) => i === index ? { ...f, status: 'error', error: err.error } : f))
+        return
+      }
+
+      const { data } = await extractRes.json() as { data: PayslipData }
+      setUploadingFiles(prev => prev.map((f, i) => i === index ? { ...f, status: 'extracted', progress: 70, data } : f))
+
+      // Save
+      setUploadingFiles(prev => prev.map((f, i) => i === index ? { ...f, status: 'saving', progress: 85 } : f))
+
+      const saveForm = new FormData()
+      saveForm.append('file', file)
+      saveForm.append('employee_name', data.employee_name || '')
+      saveForm.append('employee_role', data.employee_role || '')
+      saveForm.append('month', data.period || selectedMonth)
+      saveForm.append('gross_salary', String(data.gross_salary || 0))
+      saveForm.append('net_salary', String(data.net_salary_after_tax || data.net_salary_before_tax || 0))
+      saveForm.append('employer_charges', String(data.employer_charges || 0))
+      saveForm.append('employee_charges', String(data.employee_charges || 0))
+      saveForm.append('advance_amount', String(data.advance_amount || 0))
+      saveForm.append('contract_type', data.contract_type || '')
+      saveForm.append('bonuses', JSON.stringify(data.bonuses || []))
+
+      const saveRes = await authFetch('/api/payslips', { method: 'POST', body: saveForm })
+
+      if (!saveRes.ok) {
+        setUploadingFiles(prev => prev.map((f, i) => i === index ? { ...f, status: 'error', error: 'Erreur sauvegarde' } : f))
+        return
+      }
+
+      setUploadingFiles(prev => prev.map((f, i) => i === index ? { ...f, status: 'done', progress: 100 } : f))
+      fetchPayslips()
     } catch (e) {
-      console.error('Validate payslip error:', e)
+      setUploadingFiles(prev => prev.map((f, i) => i === index ? { ...f, status: 'error', error: 'Erreur inattendue' } : f))
     }
   }
 
-  const handleDeletePayslip = async (id: string) => {
+  const handleFiles = (files: FileList | File[]) => {
+    const arr = Array.from(files)
+    const startIdx = uploadingFiles.length
+    const newFiles: UploadingFile[] = arr.map(f => ({ file: f, status: 'uploading' as const, progress: 10 }))
+    setUploadingFiles(prev => [...prev, ...newFiles])
+    arr.forEach((f, i) => processFile(f, startIdx + i))
+  }
+
+  const handleDrop = useCallback((e: React.DragEvent) => {
+    e.preventDefault()
+    setIsDragOver(false)
+    if (e.dataTransfer.files.length > 0) handleFiles(e.dataTransfer.files)
+  }, [uploadingFiles.length])
+
+  const handleDelete = async (id: string) => {
     if (!confirm('Supprimer ce bulletin de paie ?')) return
-    try {
-      const res = await authFetch(`/api/payslips/${id}`, { method: 'DELETE' })
-      if (res.ok) await fetchAll()
-    } catch (e) {
-      console.error('Delete payslip error:', e)
-    }
+    await authFetch(`/api/payslips/${id}`, { method: 'DELETE' })
+    fetchPayslips()
   }
 
-  // ── Employee form handlers ────────────────────────
-  const handleSaveEmployee = async () => {
-    setSaving(true)
-    try {
-      const res = await authFetch('/api/employees', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          name: employeeForm.name,
-          role: employeeForm.role || null,
-          monthly_gross: employeeForm.monthly_gross ? parseFloat(employeeForm.monthly_gross) : null,
-        }),
-      })
-      if (res.ok) {
-        setShowEmployeeForm(false)
-        setEmployeeForm(emptyEmployeeForm)
-        await fetchAll()
-      }
-    } catch (e) {
-      console.error('Save employee error:', e)
-    }
-    setSaving(false)
-  }
+  const totalBrut = payslips.reduce((s, p) => s + (p.gross_salary || 0), 0)
+  const totalNet = payslips.reduce((s, p) => s + (p.net_after_tax || p.net_salary || 0), 0)
+  const totalCharges = payslips.reduce((s, p) => s + (p.employer_charges || 0), 0)
+  const totalAcomptes = payslips.reduce((s, p) => s + (p.advance_amount || 0), 0)
+  const totalSoldes = payslips.reduce((s, p) => s + (p.remaining_salary || 0), 0)
 
-  // ── Match transactions ────────────────────────────
-  const openMatchPanel = (payslipId: string) => {
-    setMatchingPayslipId(payslipId)
-    setSelectedTxIds([])
-  }
+  if (authLoading) return <AppLayout><div className="flex h-64 items-center justify-center"><Loader2 className="h-8 w-8 animate-spin text-accent-green" /></div></AppLayout>
 
-  const toggleTxSelection = (txId: string) => {
-    setSelectedTxIds((prev) =>
-      prev.includes(txId) ? prev.filter((id) => id !== txId) : [...prev, txId]
-    )
-  }
-
-  const handleMatchTransactions = async () => {
-    if (!matchingPayslipId || selectedTxIds.length === 0) return
-    setMatchSaving(true)
-    try {
-      const res = await authFetch(`/api/payslips/${matchingPayslipId}/match-transactions`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ transaction_ids: selectedTxIds }),
-      })
-      if (res.ok) {
-        setMatchingPayslipId(null)
-        setSelectedTxIds([])
-        await fetchAll()
-      }
-    } catch (e) {
-      console.error('Match transactions error:', e)
-    }
-    setMatchSaving(false)
-  }
-
-  // When employee is selected from dropdown, auto-fill name and gross
-  const handleEmployeeSelect = (employeeId: string) => {
-    const emp = employees.find((e) => e.id === employeeId)
-    if (emp) {
-      setPayslipForm((prev) => ({
-        ...prev,
-        employee_id: emp.id,
-        employee_name: emp.name,
-        gross_salary: emp.monthly_gross ? String(emp.monthly_gross) : prev.gross_salary,
-      }))
-    }
-  }
-
-  // ── Render ─────────────────────────────────────────
   return (
     <AppLayout>
-      <div className="space-y-6">
-        {/* Header */}
+      <div className="mx-auto max-w-7xl space-y-6 p-4 md:p-8">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-purple-500/10">
-              <Users className="h-5 w-5 text-purple-400" />
-            </div>
+            <div className="rounded-xl bg-purple-500/10 p-3"><Users className="h-6 w-6 text-purple-400" /></div>
             <div>
               <h1 className="text-2xl font-bold text-white">Frais de personnel</h1>
-              <p className="text-sm text-gray-500">Bulletins de paie et charges sociales</p>
+              <p className="text-sm text-gray-500">Upload des bulletins de paie — extraction automatique par IA</p>
             </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button
-              onClick={() => setShowEmployeeForm(true)}
-              className="flex items-center gap-2 rounded-lg border border-dark-border bg-dark-card px-3 py-2 text-sm font-medium text-gray-300 transition-colors hover:border-gray-500 hover:text-white"
-            >
-              <UserPlus className="h-4 w-4" />
-              Nouvel employe
-            </button>
-            <button onClick={openAddPayslip} className="btn-primary flex items-center gap-2">
-              <Plus className="h-4 w-4" />
-              Ajouter un bulletin
-            </button>
-          </div>
         </div>
 
-        {/* Filters */}
-        <div className="flex flex-wrap items-center gap-4">
-          <select
-            value={month}
-            onChange={(e) => setMonth(e.target.value)}
-            className="rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm text-gray-200 focus:border-accent-green focus:outline-none"
-          >
-            {generateMonths().map((m) => (
-              <option key={m} value={m}>
-                {new Date(m + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
-              </option>
-            ))}
-          </select>
+        <select value={selectedMonth} onChange={(e) => setSelectedMonth(e.target.value)} className="input-field w-48">
+          {monthOptions.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
+        </select>
 
-          <div className="flex flex-wrap gap-2">
-            <button
-              onClick={() => setEmployeeFilter('all')}
-              className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                employeeFilter === 'all'
-                  ? 'border-accent-green bg-accent-green/10 text-accent-green'
-                  : 'border-dark-border text-gray-400 hover:border-gray-500 hover:text-gray-300'
-              }`}
-            >
-              Tous
-            </button>
-            {employees.filter((e) => e.is_active).map((emp) => (
-              <button
-                key={emp.id}
-                onClick={() => setEmployeeFilter(emp.id)}
-                className={`rounded-lg border px-3 py-1.5 text-xs font-medium transition-colors ${
-                  employeeFilter === emp.id
-                    ? 'border-purple-500 bg-purple-500/10 text-purple-400'
-                    : 'border-dark-border text-gray-400 hover:border-gray-500 hover:text-gray-300'
-                }`}
-              >
-                {emp.name}
-              </button>
+        {/* Upload zone */}
+        <div
+          onDrop={handleDrop}
+          onDragOver={(e) => { e.preventDefault(); setIsDragOver(true) }}
+          onDragLeave={() => setIsDragOver(false)}
+          className={`rounded-xl border-2 border-dashed p-8 text-center transition-colors ${isDragOver ? 'border-accent-green bg-accent-green/5' : 'border-dark-border'}`}
+        >
+          <Upload className="mx-auto h-10 w-10 text-gray-500" />
+          <p className="mt-2 text-gray-300">Glissez-deposez vos bulletins de paie (PDF)</p>
+          <p className="text-xs text-gray-500">L&apos;IA extrait automatiquement : employe, brut, net, charges, acompte, solde...</p>
+          <label className="mt-3 inline-block cursor-pointer rounded-lg bg-accent-green px-4 py-2 text-sm font-semibold text-dark-bg hover:bg-accent-green/90">
+            Parcourir les fichiers
+            <input type="file" accept=".pdf" multiple className="hidden" onChange={(e) => e.target.files && handleFiles(e.target.files)} />
+          </label>
+        </div>
+
+        {/* Upload progress */}
+        {uploadingFiles.length > 0 && (
+          <div className="space-y-2">
+            {uploadingFiles.map((uf, i) => (
+              <div key={i} className="card flex items-center gap-3 p-3">
+                <FileText className="h-5 w-5 text-gray-400 shrink-0" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm text-gray-200">{uf.file.name}</p>
+                  <p className={`text-xs ${uf.status === 'error' ? 'text-accent-red' : uf.status === 'done' ? 'text-accent-green' : 'text-gray-500'}`}>
+                    {uf.status === 'uploading' && 'Upload...'}
+                    {uf.status === 'extracting' && 'Extraction IA en cours...'}
+                    {uf.status === 'extracted' && `Extrait : ${uf.data?.employee_name} — Brut ${fmt(uf.data?.gross_salary || 0)}`}
+                    {uf.status === 'saving' && 'Sauvegarde...'}
+                    {uf.status === 'done' && `${uf.data?.employee_name} — ${uf.data?.period}`}
+                    {uf.status === 'error' && uf.error}
+                  </p>
+                  {['uploading', 'extracting', 'saving'].includes(uf.status) && (
+                    <div className="mt-1 h-1 w-full overflow-hidden rounded-full bg-dark-input">
+                      <div className="h-full rounded-full bg-accent-green transition-all" style={{ width: `${uf.progress}%` }} />
+                    </div>
+                  )}
+                </div>
+                {uf.status === 'done' && <Check className="h-5 w-5 text-accent-green shrink-0" />}
+                {uf.status === 'error' && <AlertTriangle className="h-5 w-5 text-accent-red shrink-0" />}
+                {uf.status === 'extracting' && <Loader2 className="h-5 w-5 animate-spin text-accent-green shrink-0" />}
+              </div>
             ))}
           </div>
-        </div>
+        )}
 
         {/* Summary cards */}
-        <div className="grid grid-cols-2 gap-4 lg:grid-cols-5">
-          <div className="rounded-xl border border-dark-border bg-dark-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Total brut</p>
-            <p className="mt-2 text-xl font-bold font-mono text-gray-200">{formatAmount(totals.gross)}</p>
-          </div>
-          <div className="rounded-xl border border-dark-border bg-dark-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Total net</p>
-            <p className="mt-2 text-xl font-bold font-mono text-accent-green">{formatAmount(totals.net)}</p>
-          </div>
-          <div className="rounded-xl border border-dark-border bg-dark-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Charges patron</p>
-            <p className="mt-2 text-xl font-bold font-mono text-accent-orange">{formatAmount(totals.charges)}</p>
-          </div>
-          <div className="rounded-xl border border-dark-border bg-dark-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Acomptes</p>
-            <p className="mt-2 text-xl font-bold font-mono text-accent-blue">{formatAmount(totals.advance)}</p>
-          </div>
-          <div className="rounded-xl border border-dark-border bg-dark-card p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-gray-500">Soldes a verser</p>
-            <p className="mt-2 text-xl font-bold font-mono text-purple-400">{formatAmount(totals.remaining)}</p>
-          </div>
-        </div>
-
-        {/* Employee form */}
-        {showEmployeeForm && (
-          <div className="rounded-xl border border-dark-border bg-dark-card p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-white">Nouvel employe</h2>
-              <button onClick={() => { setShowEmployeeForm(false); setEmployeeForm(emptyEmployeeForm) }} className="text-gray-500 hover:text-gray-300">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-3">
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Nom complet</label>
-                <input
-                  type="text"
-                  value={employeeForm.name}
-                  onChange={(e) => setEmployeeForm({ ...employeeForm, name: e.target.value })}
-                  placeholder="Nom Prenom"
-                  className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-accent-green focus:outline-none"
-                />
+        {payslips.length > 0 && (
+          <div className="grid grid-cols-2 gap-4 md:grid-cols-5">
+            {[
+              { label: 'TOTAL BRUT', value: totalBrut, color: 'text-white' },
+              { label: 'TOTAL NET', value: totalNet, color: 'text-accent-green' },
+              { label: 'CHARGES PATRON', value: totalCharges, color: 'text-accent-orange' },
+              { label: 'ACOMPTES', value: totalAcomptes, color: 'text-accent-blue' },
+              { label: 'SOLDES A VERSER', value: totalSoldes, color: 'text-purple-400' },
+            ].map((c) => (
+              <div key={c.label} className="card p-4">
+                <p className="text-xs font-medium text-gray-500">{c.label}</p>
+                <p className={`mt-1 font-mono text-lg font-bold ${c.color}`}>{fmt(c.value)}</p>
               </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Poste</label>
-                <input
-                  type="text"
-                  value={employeeForm.role}
-                  onChange={(e) => setEmployeeForm({ ...employeeForm, role: e.target.value })}
-                  placeholder="Ex: Game master"
-                  className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-accent-green focus:outline-none"
-                />
-              </div>
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Salaire brut mensuel</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={employeeForm.monthly_gross}
-                  onChange={(e) => setEmployeeForm({ ...employeeForm, monthly_gross: e.target.value })}
-                  placeholder="0.00"
-                  className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:border-accent-green focus:outline-none"
-                />
-              </div>
-            </div>
-            <div className="mt-4 flex items-center gap-3">
-              <button
-                onClick={handleSaveEmployee}
-                disabled={saving || !employeeForm.name}
-                className="btn-primary flex items-center gap-2 disabled:opacity-50"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                Enregistrer
-              </button>
-              <button onClick={() => { setShowEmployeeForm(false); setEmployeeForm(emptyEmployeeForm) }} className="btn-secondary">
-                Annuler
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Payslip form */}
-        {showPayslipForm && (
-          <div className="rounded-xl border border-dark-border bg-dark-card p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <h2 className="text-lg font-semibold text-white">
-                {editingId ? 'Modifier le bulletin' : 'Nouveau bulletin de paie'}
-              </h2>
-              <button onClick={closePayslipForm} className="text-gray-500 hover:text-gray-300">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-
-            <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
-              {/* Employee */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Employe</label>
-                {employees.length > 0 ? (
-                  <select
-                    value={payslipForm.employee_id}
-                    onChange={(e) => handleEmployeeSelect(e.target.value)}
-                    className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm text-gray-200 focus:border-accent-green focus:outline-none"
-                  >
-                    <option value="">-- Selectionner --</option>
-                    {employees.filter((e) => e.is_active).map((emp) => (
-                      <option key={emp.id} value={emp.id}>{emp.name}{emp.role ? ` (${emp.role})` : ''}</option>
-                    ))}
-                  </select>
-                ) : (
-                  <input
-                    type="text"
-                    value={payslipForm.employee_name}
-                    onChange={(e) => setPayslipForm({ ...payslipForm, employee_name: e.target.value })}
-                    placeholder="Nom de l'employe"
-                    className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-accent-green focus:outline-none"
-                  />
-                )}
-              </div>
-
-              {/* Month */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Mois</label>
-                <select
-                  value={payslipForm.month}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, month: e.target.value })}
-                  className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm text-gray-200 focus:border-accent-green focus:outline-none"
-                >
-                  {generateMonths().map((m) => (
-                    <option key={m} value={m}>
-                      {new Date(m + '-01').toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })}
-                    </option>
-                  ))}
-                </select>
-              </div>
-
-              {/* Gross salary */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Salaire brut</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={payslipForm.gross_salary}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, gross_salary: e.target.value })}
-                  placeholder="0.00"
-                  className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:border-accent-green focus:outline-none"
-                />
-              </div>
-
-              {/* Net salary */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Salaire net</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={payslipForm.net_salary}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, net_salary: e.target.value })}
-                  placeholder="0.00"
-                  className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:border-accent-green focus:outline-none"
-                />
-              </div>
-
-              {/* Employer charges */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Charges patronales</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={payslipForm.employer_charges}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, employer_charges: e.target.value })}
-                  placeholder="0.00"
-                  className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:border-accent-green focus:outline-none"
-                />
-              </div>
-
-              {/* Advance amount */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Acompte verse</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  min="0"
-                  value={payslipForm.advance_amount}
-                  onChange={(e) => setPayslipForm({ ...payslipForm, advance_amount: e.target.value })}
-                  placeholder="0.00"
-                  className="w-full rounded-lg border border-dark-border bg-dark-input px-3 py-2 text-sm font-mono text-gray-200 placeholder-gray-600 focus:border-accent-green focus:outline-none"
-                />
-              </div>
-
-              {/* Remaining (auto) */}
-              <div>
-                <label className="mb-1 block text-xs font-medium text-gray-400">Solde a verser</label>
-                <div className="flex h-[38px] items-center rounded-lg border border-dark-border bg-dark-input/50 px-3 text-sm font-mono text-accent-green">
-                  {formatAmount(computedRemaining)}
-                </div>
-              </div>
-
-              {/* File upload */}
-              {!editingId && (
-                <div>
-                  <label className="mb-1 block text-xs font-medium text-gray-400">Bulletin PDF</label>
-                  <label className="flex cursor-pointer items-center gap-2 rounded-lg border border-dashed border-dark-border bg-dark-input px-3 py-2 text-sm text-gray-400 transition-colors hover:border-gray-500">
-                    <Upload className="h-4 w-4" />
-                    {payslipForm.file ? payslipForm.file.name : 'Choisir un fichier'}
-                    <input
-                      type="file"
-                      accept=".pdf"
-                      className="hidden"
-                      onChange={(e) => setPayslipForm({ ...payslipForm, file: e.target.files?.[0] || null })}
-                    />
-                  </label>
-                </div>
-              )}
-            </div>
-
-            <div className="mt-6 flex items-center gap-3">
-              <button
-                onClick={handleSavePayslip}
-                disabled={saving || !payslipForm.employee_name || !payslipForm.gross_salary || !payslipForm.net_salary}
-                className="btn-primary flex items-center gap-2 disabled:opacity-50"
-              >
-                {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                {editingId ? 'Mettre a jour' : 'Enregistrer'}
-              </button>
-              <button onClick={closePayslipForm} className="btn-secondary">
-                Annuler
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Match transactions panel */}
-        {matchingPayslipId && (
-          <div className="rounded-xl border border-accent-blue/30 bg-dark-card p-6">
-            <div className="mb-4 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Link2 className="h-5 w-5 text-accent-blue" />
-                <h2 className="text-lg font-semibold text-white">Rapprocher des lignes bancaires</h2>
-              </div>
-              <button onClick={() => { setMatchingPayslipId(null); setSelectedTxIds([]) }} className="text-gray-500 hover:text-gray-300">
-                <X className="h-5 w-5" />
-              </button>
-            </div>
-            <p className="mb-4 text-sm text-gray-400">
-              Selectionnez les lignes de releve bancaire correspondant a ce bulletin (acompte + solde).
-            </p>
-
-            {unmatchedTransactions.length === 0 ? (
-              <p className="text-sm text-gray-500">Aucune transaction non rapprochee pour ce mois.</p>
-            ) : (
-              <div className="max-h-64 space-y-2 overflow-y-auto">
-                {unmatchedTransactions.map((tx) => (
-                  <label
-                    key={tx.id}
-                    className={`flex cursor-pointer items-center gap-3 rounded-lg border p-3 transition-colors ${
-                      selectedTxIds.includes(tx.id)
-                        ? 'border-accent-blue bg-accent-blue/10'
-                        : 'border-dark-border hover:border-gray-500'
-                    }`}
-                  >
-                    <input
-                      type="checkbox"
-                      checked={selectedTxIds.includes(tx.id)}
-                      onChange={() => toggleTxSelection(tx.id)}
-                      className="h-4 w-4 rounded border-gray-600 bg-dark-input text-accent-blue focus:ring-accent-blue"
-                    />
-                    <span className="font-mono text-xs text-gray-400">{tx.date}</span>
-                    <span className="flex-1 truncate text-sm text-gray-200">{tx.label}</span>
-                    <span className={`font-mono text-sm font-medium ${tx.type === 'debit' ? 'text-accent-red' : 'text-accent-green'}`}>
-                      {tx.type === 'debit' ? '-' : '+'}{formatAmount(Math.abs(tx.amount))}
-                    </span>
-                  </label>
-                ))}
-              </div>
-            )}
-
-            {selectedTxIds.length > 0 && (
-              <div className="mt-4 flex items-center gap-3">
-                <button
-                  onClick={handleMatchTransactions}
-                  disabled={matchSaving}
-                  className="btn-primary flex items-center gap-2 disabled:opacity-50"
-                >
-                  {matchSaving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Link2 className="h-4 w-4" />}
-                  Rapprocher {selectedTxIds.length} ligne{selectedTxIds.length > 1 ? 's' : ''}
-                </button>
-                <span className="text-xs text-gray-500">
-                  {selectedTxIds.length} transaction{selectedTxIds.length > 1 ? 's' : ''} selectionnee{selectedTxIds.length > 1 ? 's' : ''}
-                </span>
-              </div>
-            )}
+            ))}
           </div>
         )}
 
         {/* Payslips table */}
-        <div className="overflow-hidden rounded-xl border border-dark-border bg-dark-card">
+        <div className="card overflow-hidden">
           {loading ? (
-            <div className="flex items-center justify-center p-12">
-              <Loader2 className="h-8 w-8 animate-spin text-accent-green" />
-            </div>
-          ) : filtered.length === 0 ? (
-            <div className="flex flex-col items-center justify-center p-12 text-gray-500">
-              <Users className="mb-3 h-12 w-12 text-gray-600" />
-              <p className="text-sm">Aucun bulletin de paie pour cette periode</p>
-              <button onClick={openAddPayslip} className="mt-3 text-sm text-accent-green hover:underline">
-                Ajouter un bulletin
-              </button>
+            <div className="flex h-32 items-center justify-center"><Loader2 className="h-6 w-6 animate-spin text-accent-green" /></div>
+          ) : payslips.length === 0 ? (
+            <div className="p-8 text-center text-gray-500">
+              <Users className="mx-auto h-12 w-12 text-gray-600" />
+              <p className="mt-2">Aucun bulletin pour cette periode</p>
             </div>
           ) : (
             <div className="overflow-x-auto">
               <table className="w-full text-sm">
                 <thead>
-                  <tr className="border-b border-dark-border text-left text-xs font-semibold uppercase tracking-wider text-gray-500">
+                  <tr className="border-b border-dark-border bg-dark-input/50 text-left text-xs font-medium uppercase text-gray-500">
                     <th className="px-4 py-3">Employe</th>
+                    <th className="px-4 py-3">Contrat</th>
                     <th className="px-4 py-3 text-right">Brut</th>
                     <th className="px-4 py-3 text-right">Net</th>
                     <th className="px-4 py-3 text-right">Charges</th>
                     <th className="px-4 py-3 text-right">Acompte</th>
                     <th className="px-4 py-3 text-right">Solde</th>
                     <th className="px-4 py-3">Fichier</th>
-                    <th className="px-4 py-3">Rapprochement</th>
-                    <th className="px-4 py-3">Statut</th>
                     <th className="px-4 py-3 text-right">Actions</th>
                   </tr>
                 </thead>
-                <tbody className="divide-y divide-dark-border">
-                  {filtered.map((p) => (
-                    <tr key={p.id} className="transition-colors hover:bg-dark-hover">
-                      <td className="whitespace-nowrap px-4 py-3 font-medium text-gray-200">
-                        {p.employee_name}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-gray-200">
-                        {formatAmount(p.gross_salary)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-gray-200">
-                        {formatAmount(p.net_salary)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-accent-orange">
-                        {formatAmount(p.employer_charges)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono text-accent-blue">
-                        {formatAmount(p.advance_amount)}
-                      </td>
-                      <td className="whitespace-nowrap px-4 py-3 text-right font-mono font-medium text-purple-400">
-                        {formatAmount(p.remaining_salary)}
-                      </td>
+                <tbody>
+                  {payslips.map((p) => (
+                    <tr key={p.id} className="border-b border-dark-border/50 hover:bg-dark-hover/30">
                       <td className="px-4 py-3">
-                        {p.file_path ? (
-                          <span className="inline-flex items-center gap-1 text-xs text-accent-blue">
-                            <FileText className="h-3.5 w-3.5" />
-                            {p.file_name || 'PDF'}
-                          </span>
-                        ) : (
-                          <span className="text-xs text-gray-600">-</span>
-                        )}
+                        <p className="font-medium text-gray-200">{p.employee_name}</p>
+                        {p.employee_role && <p className="text-xs text-gray-500">{p.employee_role}</p>}
                       </td>
-                      <td className="px-4 py-3">
-                        {p.matched_transaction_ids && p.matched_transaction_ids.length > 0 ? (
-                          <span className="inline-flex items-center gap-1 rounded-full border border-green-500/30 bg-green-500/20 px-2.5 py-0.5 text-xs font-medium text-green-400">
-                            <Link2 className="h-3 w-3" />
-                            {p.matched_transaction_ids.length} ligne{p.matched_transaction_ids.length > 1 ? 's' : ''}
-                          </span>
-                        ) : (
-                          <button
-                            onClick={() => openMatchPanel(p.id)}
-                            className="inline-flex items-center gap-1 rounded-full border border-accent-orange/30 bg-accent-orange/10 px-2.5 py-0.5 text-xs font-medium text-accent-orange transition-colors hover:bg-accent-orange/20"
-                          >
-                            <AlertCircle className="h-3 w-3" />
-                            Non rapproche
-                          </button>
-                        )}
-                      </td>
-                      <td className="px-4 py-3">
-                        <span className={`inline-flex rounded-full border px-2.5 py-0.5 text-xs font-medium ${STATUS_STYLES[p.status] || STATUS_STYLES.draft}`}>
-                          {STATUS_LABELS[p.status] || p.status}
-                        </span>
-                      </td>
-                      <td className="px-4 py-3">
-                        <div className="flex items-center justify-end gap-1">
-                          {p.status === 'draft' && (
-                            <>
-                              <button
-                                onClick={() => openEditPayslip(p)}
-                                title="Modifier"
-                                className="rounded p-1.5 text-gray-500 transition-colors hover:bg-dark-hover hover:text-gray-300"
-                              >
-                                <Pencil className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => handleValidatePayslip(p.id)}
-                                title="Valider"
-                                className="rounded p-1.5 text-gray-500 transition-colors hover:bg-accent-green/10 hover:text-accent-green"
-                              >
-                                <Check className="h-4 w-4" />
-                              </button>
-                              <button
-                                onClick={() => handleDeletePayslip(p.id)}
-                                title="Supprimer"
-                                className="rounded p-1.5 text-gray-500 transition-colors hover:bg-accent-red/10 hover:text-accent-red"
-                              >
-                                <Trash2 className="h-4 w-4" />
-                              </button>
-                            </>
-                          )}
-                          {p.status === 'validated' && (
-                            <span className="text-xs text-gray-500">Valide</span>
-                          )}
-                        </div>
+                      <td className="px-4 py-3 text-xs text-gray-400">{p.contract_type || '-'}</td>
+                      <td className="px-4 py-3 text-right font-mono text-gray-200">{fmt(p.gross_salary)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-accent-green">{fmt(p.net_after_tax || p.net_salary)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-accent-orange">{fmt(p.employer_charges)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-accent-blue">{fmt(p.advance_amount)}</td>
+                      <td className="px-4 py-3 text-right font-mono text-purple-400">{fmt(p.remaining_salary)}</td>
+                      <td className="px-4 py-3"><span className="text-xs text-gray-400 truncate block max-w-[120px]">{p.file_name || '-'}</span></td>
+                      <td className="px-4 py-3 text-right">
+                        <button onClick={() => handleDelete(p.id)} className="rounded p-1 text-gray-500 hover:bg-accent-red/10 hover:text-accent-red">
+                          <Trash2 className="h-4 w-4" />
+                        </button>
                       </td>
                     </tr>
                   ))}
-                  {/* Totals row */}
-                  <tr className="border-t-2 border-dark-border bg-dark-bg/50 font-semibold">
-                    <td className="px-4 py-3 text-gray-300">TOTAL</td>
-                    <td className="px-4 py-3 text-right font-mono text-gray-200">{formatAmount(totals.gross)}</td>
-                    <td className="px-4 py-3 text-right font-mono text-gray-200">{formatAmount(totals.net)}</td>
-                    <td className="px-4 py-3 text-right font-mono text-accent-orange">{formatAmount(totals.charges)}</td>
-                    <td className="px-4 py-3 text-right font-mono text-accent-blue">{formatAmount(totals.advance)}</td>
-                    <td className="px-4 py-3 text-right font-mono text-purple-400">{formatAmount(totals.remaining)}</td>
-                    <td colSpan={4} />
+                  <tr className="border-t-2 border-dark-border bg-dark-input/30 font-bold">
+                    <td className="px-4 py-3 text-gray-300" colSpan={2}>TOTAL ({payslips.length} bulletins)</td>
+                    <td className="px-4 py-3 text-right font-mono text-white">{fmt(totalBrut)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-accent-green">{fmt(totalNet)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-accent-orange">{fmt(totalCharges)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-accent-blue">{fmt(totalAcomptes)}</td>
+                    <td className="px-4 py-3 text-right font-mono text-purple-400">{fmt(totalSoldes)}</td>
+                    <td colSpan={2} />
                   </tr>
                 </tbody>
               </table>

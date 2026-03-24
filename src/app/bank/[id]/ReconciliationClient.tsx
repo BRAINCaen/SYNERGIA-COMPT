@@ -21,6 +21,7 @@ import {
   Ban,
   Clock,
   ShieldOff,
+  Eye,
 } from 'lucide-react'
 
 type TransactionStatus = 'matched' | 'unmatched' | 'ignored'
@@ -77,7 +78,11 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [searchResults, setSearchResults] = useState<MatchCandidate[]>([])
   const [searching, setSearching] = useState(false)
   const [autoReconciling, setAutoReconciling] = useState(false)
+  const [txSearch, setTxSearch] = useState('')
   const [ignoreDropdownTx, setIgnoreDropdownTx] = useState<string | null>(null)
+  const [previewCandidate, setPreviewCandidate] = useState<MatchCandidate | null>(null)
+  const [previewUrl, setPreviewUrl] = useState<string | null>(null)
+  const [loadingPreview, setLoadingPreview] = useState(false)
 
   // Close ignore dropdown on outside click
   useEffect(() => {
@@ -141,18 +146,24 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const matchPercent = totalCount > 0 ? Math.round((matchedCount / totalCount) * 100) : 0
 
   const filteredTransactions = transactions.filter((t) => {
+    // Tab filter
+    let tabMatch = true
     switch (activeTab) {
-      case 'unmatched':
-        return t.status === 'unmatched'
-      case 'matched':
-        return t.status === 'matched'
-      case 'debits':
-        return t.debit != null && t.debit > 0
-      case 'credits':
-        return t.credit != null && t.credit > 0
-      default:
-        return true
+      case 'unmatched': tabMatch = t.status === 'unmatched'; break
+      case 'matched': tabMatch = t.status === 'matched'; break
+      case 'debits': tabMatch = t.debit != null && t.debit > 0; break
+      case 'credits': tabMatch = t.credit != null && t.credit > 0; break
     }
+    if (!tabMatch) return false
+    // Search filter
+    if (txSearch.trim()) {
+      const q = txSearch.toLowerCase()
+      const label = (t.label || '').toLowerCase()
+      const date = (t.date || '')
+      const amount = String(t.debit || t.credit || '')
+      return label.includes(q) || date.includes(q) || amount.includes(q)
+    }
+    return true
   })
 
   const tabs: { key: FilterTab; label: string; count?: number }[] = [
@@ -346,6 +357,30 @@ export default function ReconciliationClient({ statementId }: { statementId: str
       console.error('Search error:', e)
     }
     setSearching(false)
+  }
+
+  // Preview a candidate invoice before confirming
+  const handlePreview = async (candidate: MatchCandidate) => {
+    setPreviewCandidate(candidate)
+    setLoadingPreview(true)
+    setPreviewUrl(null)
+    try {
+      // Fetch invoice to get file_url
+      const res = await authFetch(`/api/invoices/${candidate.id}`)
+      if (res.ok) {
+        const data = await res.json()
+        setPreviewUrl(data.file_url || null)
+      }
+    } catch { /* */ }
+    setLoadingPreview(false)
+  }
+
+  const confirmPreviewMatch = async () => {
+    if (previewCandidate) {
+      await confirmMatch(previewCandidate)
+      setPreviewCandidate(null)
+      setPreviewUrl(null)
+    }
   }
 
   const confirmMatch = async (candidate: MatchCandidate) => {
@@ -702,7 +737,10 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                             <p className="truncate text-sm font-medium text-gray-200">
                               {candidate.name}
                             </p>
-                            {candidate.supplier && (
+                            {candidate.file_name && candidate.file_name !== candidate.name && (
+                              <p className="truncate text-xs text-gray-500">{candidate.file_name}</p>
+                            )}
+                            {candidate.supplier && !candidate.file_name && (
                               <p className="text-xs text-gray-500">{candidate.supplier}</p>
                             )}
                           </div>
