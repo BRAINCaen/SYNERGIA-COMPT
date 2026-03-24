@@ -104,7 +104,11 @@ export function parseCSV(content: string): ParsedTransaction[] {
   const amountCol = findCol(headers, AMOUNT_COLS)
   const refCol = findCol(headers, REF_COLS)
 
-  if (dateCol < 0 || labelCol < 0) return []
+  console.log('[parseCSV] Headers:', headers, 'dateCol:', dateCol, 'labelCol:', labelCol, 'debitCol:', debitCol, 'creditCol:', creditCol)
+  if (dateCol < 0 || labelCol < 0) {
+    console.log('[parseCSV] Could not find required columns. Headers:', headers)
+    return []
+  }
 
   const transactions: ParsedTransaction[] = []
   for (let i = headerIdx + 1; i < rows.length; i++) {

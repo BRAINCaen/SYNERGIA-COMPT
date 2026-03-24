@@ -161,7 +161,11 @@ export async function POST(request: NextRequest) {
         let parsed: ParsedTransaction[]
 
         if (format === 'csv') {
-          const textContent = new TextDecoder('utf-8').decode(arrayBuffer)
+          // Try UTF-8 first, fallback to Latin-1 (common for French bank exports)
+          let textContent = new TextDecoder('utf-8').decode(arrayBuffer)
+          if (textContent.includes('�') || textContent.includes('\ufffd') || !textContent.includes('Date')) {
+            textContent = new TextDecoder('iso-8859-1').decode(arrayBuffer)
+          }
           parsed = parseCSV(textContent)
         } else {
           parsed = parseExcel(arrayBuffer)
