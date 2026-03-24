@@ -83,8 +83,10 @@ function parseBankStatementFromPositions(
   pages: { page: number; items: PdfTextItem[] }[]
 ): { date: string; label: string; debit: number | null; credit: number | null }[] {
   const transactions: { date: string; label: string; debit: number | null; credit: number | null }[] = []
-  const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})$/
-  const amountRegex = /^[\d][.\d\s]*,\d{2}$/
+
+  // Regex: DD/MM/YYYY DD/MM/YYYY LABEL AMOUNT
+  // Amount is at the end, French format: 1.234,56 or 234,56
+  const lineRegex = /^(\d{2})\/(\d{2})\/(\d{4})\s+\d{2}\/\d{2}\/\d{4}\s+(.+?)\s+([\d.]+,\d{2})\s*$/
 
   for (const { items } of pages) {
     if (items.length === 0) continue
@@ -92,6 +94,7 @@ function parseBankStatementFromPositions(
     // Group items by Y position (same line) — tolerance of 3px
     const lines: Map<number, PdfTextItem[]> = new Map()
     for (const item of items) {
+      if (!item.str || !item.str.trim()) continue
       let foundY = false
       for (const [y] of lines) {
         if (Math.abs(y - item.y) <= 3) {
@@ -112,45 +115,33 @@ function parseBankStatementFromPositions(
     for (const [, lineItems] of sortedLines) {
       lineItems.sort((a, b) => a.x - b.x)
 
-      // A valid transaction line must have TWO dates at the start
-      const strs = lineItems.map(it => it.str.trim()).filter(s => s.length > 0)
-      if (strs.length < 3) continue
+      // Join all items into a single line string
+      const lineStr = lineItems.map(it => it.str.trim()).filter(s => s).join(' ')
 
-      const date1Match = strs[0].match(dateRegex)
-      const date2Match = strs[1].match(dateRegex)
-      if (!date1Match || !date2Match) continue
+      // Try to match the transaction pattern
+      const match = lineStr.match(lineRegex)
+      if (!match) continue
 
-      const day = date1Match[1]
-      const month = date1Match[2]
-      const year = date1Match[3]
+      const day = match[1]
+      const month = match[2]
+      const year = match[3]
       const yearNum = parseInt(year)
       if (yearNum < 2024 || yearNum > 2030) continue
+
+      const label = match[4].trim()
+      const amountStr = match[5]
+      const amount = parseAmount(amountStr)
+
+      if (!amount || !label) continue
+
+      // Skip non-transaction lines
+      const LU = label.toUpperCase()
+      if (LU.includes('SOLDE')) continue
+      if (LU.includes('TOTAL DES MOUVEMENTS')) continue
+      if (LU.startsWith('UN.')) continue
+
       const isoDate = `${year}-${month}-${day}`
-
-      // Extract label and amounts from remaining items (skip the 2 dates)
-      const restItems = strs.slice(2)
-      let label = ''
-      const amounts: number[] = []
-
-      for (const str of restItems) {
-        if (amountRegex.test(str)) {
-          const amt = parseAmount(str)
-          if (amt !== null) amounts.push(amt)
-        } else if (str && !str.startsWith('SOLDE') && !str.startsWith('Total') &&
-                   !str.startsWith('<<') && !str.startsWith('UN.') &&
-                   !str.startsWith('Réf') && !str.startsWith('QXBAN') &&
-                   !str.startsWith('IBAN')) {
-          if (label) label += ' '
-          label += str
-        }
-      }
-
-      // Must have exactly one amount and a label
-      if (amounts.length !== 1 || !label) continue
-      if (label.toUpperCase().includes('SOLDE')) continue
-      if (label.toUpperCase().includes('TOTAL DES MOUVEMENTS')) continue
-
-      const { debit, credit } = classifyTransaction(label, amounts[0])
+      const { debit, credit } = classifyTransaction(label, amount)
       transactions.push({ date: isoDate, label, debit, credit })
     }
   }
