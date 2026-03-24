@@ -180,10 +180,21 @@ export default function BankClient() {
       }
 
       // Step 4: Split text into chunks and send each to API
-      const CHUNK_SIZE = 12000
+      // Split text at page boundaries (avoid cutting transactions mid-way)
+      const CHUNK_SIZE = 13000
       const chunks: string[] = []
-      for (let i = 0; i < fullText.length; i += CHUNK_SIZE) {
-        chunks.push(fullText.substring(i, i + CHUNK_SIZE))
+      let remaining = fullText
+      while (remaining.length > 0) {
+        if (remaining.length <= CHUNK_SIZE) {
+          chunks.push(remaining)
+          break
+        }
+        // Find the last page break or double newline within the chunk
+        let cutAt = CHUNK_SIZE
+        const pageBreak = remaining.lastIndexOf('\n\n', CHUNK_SIZE)
+        if (pageBreak > CHUNK_SIZE * 0.6) cutAt = pageBreak
+        chunks.push(remaining.substring(0, cutAt))
+        remaining = remaining.substring(cutAt)
       }
 
       let allTransactions: any[] = []
@@ -203,14 +214,19 @@ export default function BankClient() {
         }
       }
 
-      // Deduplicate by date+label+amount
-      const seen = new Set<string>()
-      const transactions = allTransactions.filter((t: any) => {
-        const key = `${t.date}|${t.label}|${t.debit || ''}|${t.credit || ''}`
-        if (seen.has(key)) return false
-        seen.add(key)
-        return true
-      })
+      // Deduplicate: count occurrences, allow genuine duplicates in the statement
+      // but remove extras from chunk overlaps
+      const keyCount: Record<string, number> = {}
+      const transactions: any[] = []
+      for (const t of allTransactions) {
+        const key = `${t.date}|${(t.label || '').substring(0, 30)}|${t.debit || ''}|${t.credit || ''}`
+        keyCount[key] = (keyCount[key] || 0) + 1
+        // Allow up to 4 identical entries (e.g. 4x Amazon 35.60 same day)
+        // but if we see more from chunk overlaps, skip
+        if (keyCount[key] <= 6) {
+          transactions.push(t)
+        }
+      }
 
       if (transactions.length === 0) {
         throw new Error('Aucune transaction trouvée dans le relevé')
