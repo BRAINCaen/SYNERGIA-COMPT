@@ -153,21 +153,64 @@ export default function BankClient() {
   const handleAnalyze = async (id: string) => {
     setAnalyzing(id)
     try {
-      const res = await authFetch(`/api/bank-statements/${id}/analyze`, {
+      const st = statements.find(s => s.id === id)
+      if (!st) return
+
+      // Step 1: Get the file URL from statement details
+      const stmtRes = await authFetch(`/api/bank-statements/${id}`)
+      if (!stmtRes.ok) throw new Error('Relevé non trouvé')
+      const stmtData = await stmtRes.json()
+
+      // Step 2: Download the PDF via proxy
+      const bucket = stmtData.file_path
+      const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/synergia-compt.firebasestorage.app/o/${encodeURIComponent(bucket)}?alt=media`
+      const proxyRes = await authFetch(`/api/proxy-pdf?url=${encodeURIComponent(downloadUrl)}`)
+      if (!proxyRes.ok) throw new Error('Impossible de télécharger le PDF')
+      const pdfBlob = await proxyRes.blob()
+
+      // Step 3: Send PDF to parse endpoint (just Claude call, no DB operations)
+      const formData = new FormData()
+      formData.append('file', pdfBlob, 'statement.pdf')
+      const parseRes = await authFetch('/api/bank-statements/parse-pdf', {
         method: 'POST',
+        body: formData,
       })
-      if (res.ok) {
-        const data = await res.json()
-        setStatements((prev) =>
-          prev.map((s) =>
-            s.id === id
-              ? { ...s, status: 'parsed' as const, transaction_count: data.transaction_count, total_debits: data.total_debits, total_credits: data.total_credits }
-              : s
-          )
-        )
+      if (!parseRes.ok) {
+        const err = await parseRes.json().catch(() => ({ error: 'Erreur IA' }))
+        throw new Error(err.error || 'Erreur de parsing')
       }
+      const { transactions } = await parseRes.json()
+
+      if (!transactions || transactions.length === 0) {
+        throw new Error('Aucune transaction trouvée')
+      }
+
+      // Step 4: Save transactions to Firestore (separate fast call)
+      const saveRes = await authFetch(`/api/bank-statements/${id}/save-transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactions }),
+      })
+      if (!saveRes.ok) throw new Error('Erreur de sauvegarde')
+      const saveData = await saveRes.json()
+
+      setStatements((prev) =>
+        prev.map((s) =>
+          s.id === id
+            ? {
+                ...s,
+                status: 'parsed' as const,
+                transaction_count: saveData.transaction_count,
+                total_debits: saveData.total_debits,
+                total_credits: saveData.total_credits,
+                period_month: saveData.period_month || s.period_month,
+              }
+            : s
+        )
+      )
     } catch (e) {
       console.error('Analyze failed:', e)
+      alert(`Erreur d'analyse : ${e instanceof Error ? e.message : 'Erreur inconnue'}`)
     }
     setAnalyzing(null)
   }
