@@ -264,75 +264,95 @@ export default function BankClient() {
   const handleAnalyze = async (id: string) => {
     setAnalyzing(id)
     try {
-      // Step 1: Get file path
+      // Step 1: Get statement info
       const stmtRes = await authFetch(`/api/bank-statements/${id}`)
       if (!stmtRes.ok) throw new Error('Relevé non trouvé')
       const stmtData = await stmtRes.json()
 
-      // Step 2: Download PDF via proxy
+      // Step 2: Download file via proxy
       const proxyRes = await authFetch(`/api/proxy-pdf?path=${encodeURIComponent(stmtData.file_path)}`)
       if (!proxyRes.ok) throw new Error('Téléchargement échoué')
-      const pdfBuffer = await proxyRes.arrayBuffer()
+      const fileBuffer = await proxyRes.arrayBuffer()
 
-      // Step 3: Extract text from PDF IN THE BROWSER using pdfjs-dist
-      const pdfjsLib = await import('pdfjs-dist')
-      pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) }).promise
+      let transactions: { date: string; label: string; debit: number | null; credit: number | null }[] = []
 
-      // Extract text WITH positions to detect debit vs credit columns
-      const allItems: { page: number; items: PdfTextItem[] }[] = []
-      let fullText = ''
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i)
-        const content = await page.getTextContent()
-        const pageItems: PdfTextItem[] = content.items
-          .filter((item: any) => item.str && item.str.trim())
-          .map((item: any) => ({
-            str: item.str,
-            x: Math.round(item.transform[4]),
-            y: Math.round(item.transform[5]),
-          }))
-        allItems.push({ page: i, items: pageItems })
-        fullText += content.items.map((item: any) => item.str).join(' ') + '\n'
-      }
+      const fileName = (stmtData.file_name || '').toLowerCase()
+      const isCSV = fileName.endsWith('.csv')
 
-      if (fullText.trim().length < 30) {
-        throw new Error('PDF illisible — aucun texte extractible')
-      }
-
-      // Step 4: Send EACH PAGE separately to AI (small text = fast response = no timeout)
-      // Each page has ~5-15 transactions max
-      const pageTexts: string[] = []
-      for (let i = 1; i <= pdf.numPages; i++) {
-        const page = await pdf.getPage(i)
-        const content = await page.getTextContent()
-        const text = content.items.map((item: any) => item.str).join(' ')
-        if (text.length > 50) pageTexts.push(text)
-      }
-
-      let allTransactions: any[] = []
-      for (let p = 0; p < pageTexts.length; p++) {
-        setAnalyzing(`page ${p + 1}/${pageTexts.length}`)
-        try {
-          const parseRes = await authFetch('/api/bank-statements/parse-text', {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ text: pageTexts[p] }),
-          })
-          if (parseRes.ok) {
-            const data = await parseRes.json()
-            if (data.transactions?.length > 0) {
-              allTransactions = allTransactions.concat(data.transactions)
-            }
-          }
-        } catch {
-          // Skip failed pages, continue with others
+      if (isCSV) {
+        // ═══ CSV PARSING (deterministic, 100% accurate) ═══
+        const decoder = new TextDecoder('utf-8')
+        let csvText = decoder.decode(fileBuffer)
+        // Try latin-1 if we see garbled characters
+        if (csvText.includes('�') || csvText.includes('\ufffd')) {
+          csvText = new TextDecoder('iso-8859-1').decode(fileBuffer)
         }
-      }
-      setAnalyzing(id)
 
-      // No deduplication needed — each page is processed separately, no overlap
-      const transactions = allTransactions
+        const lines = csvText.split('\n').map(l => l.trim()).filter(l => l)
+        // Skip header line
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(';')
+          if (cols.length < 5) continue
+
+          const dateStr = cols[0] // DD/MM/YYYY
+          const debitStr = cols[2]  // negative number or empty
+          const creditStr = cols[3] // positive number or empty
+          const label = cols[4]
+
+          // Parse date
+          const dm = dateStr.match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+          if (!dm) continue
+          const isoDate = `${dm[3]}-${dm[2]}-${dm[1]}`
+
+          // Parse amounts (French format: -1234,56 or 1234,56)
+          let debit: number | null = null
+          let credit: number | null = null
+
+          if (debitStr && debitStr.trim()) {
+            const val = parseFloat(debitStr.replace(/\s/g, '').replace(',', '.'))
+            if (!isNaN(val)) debit = Math.abs(Math.round(val * 100) / 100)
+          }
+          if (creditStr && creditStr.trim()) {
+            const val = parseFloat(creditStr.replace(/\s/g, '').replace(',', '.'))
+            if (!isNaN(val)) credit = Math.round(val * 100) / 100
+          }
+
+          if ((debit === null && credit === null) || !label) continue
+
+          // Clean label: take first meaningful part
+          const cleanLabel = label.split(/\s{2,}/)[0].substring(0, 80)
+
+          transactions.push({ date: isoDate, label: cleanLabel, debit, credit })
+        }
+      } else {
+        // ═══ PDF PARSING (AI page by page) ═══
+        const pdfjsLib = await import('pdfjs-dist')
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(fileBuffer) }).promise
+
+        for (let i = 1; i <= pdf.numPages; i++) {
+          setAnalyzing(`page ${i}/${pdf.numPages}`)
+          const page = await pdf.getPage(i)
+          const content = await page.getTextContent()
+          const text = content.items.map((item: any) => item.str).join(' ')
+          if (text.length < 50) continue
+
+          try {
+            const parseRes = await authFetch('/api/bank-statements/parse-text', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ text }),
+            })
+            if (parseRes.ok) {
+              const data = await parseRes.json()
+              if (data.transactions?.length > 0) {
+                transactions = transactions.concat(data.transactions)
+              }
+            }
+          } catch { /* skip failed page */ }
+        }
+        setAnalyzing(id)
+      }
 
       if (transactions.length === 0) {
         throw new Error('Aucune transaction trouvée dans le relevé')

@@ -34,9 +34,16 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Paramètre url ou path requis' }, { status: 400 })
     }
 
+    // Detect content type from path
+    const filePath = path || url || ''
+    let contentType = 'application/octet-stream'
+    if (filePath.endsWith('.pdf')) contentType = 'application/pdf'
+    else if (filePath.endsWith('.csv')) contentType = 'text/csv'
+    else if (filePath.endsWith('.xlsx') || filePath.endsWith('.xls')) contentType = 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+
     return new NextResponse(data as unknown as BodyInit, {
       headers: {
-        'Content-Type': 'application/pdf',
+        'Content-Type': contentType,
         'Content-Length': String(data.length),
         'Cache-Control': 'private, max-age=3600',
       },
