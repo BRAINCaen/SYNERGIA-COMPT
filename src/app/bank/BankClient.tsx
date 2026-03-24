@@ -325,27 +325,44 @@ export default function BankClient() {
           transactions.push({ date: isoDate, label: cleanLabel, debit, credit })
         }
       } else {
-        // ═══ PDF PARSING (AI page by page) ═══
+        // ═══ PDF PARSING: render each page as IMAGE → Claude Vision ═══
+        // Claude sees the actual column layout → perfect debit/credit
         const pdfjsLib = await import('pdfjs-dist')
         pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
         const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(fileBuffer) }).promise
 
         for (let i = 1; i <= pdf.numPages; i++) {
           setAnalyzing(`page ${i}/${pdf.numPages}`)
-          const page = await pdf.getPage(i)
-          const content = await page.getTextContent()
-          const text = content.items.map((item: any) => item.str).join(' ')
-          if (text.length < 50) continue
-
           try {
-            const parseRes = await authFetch('/api/bank-statements/parse-text', {
+            const page = await pdf.getPage(i)
+            // Render page to canvas at 1.5x scale for readability
+            const viewport = page.getViewport({ scale: 1.5 })
+            const canvas = document.createElement('canvas')
+            canvas.width = viewport.width
+            canvas.height = viewport.height
+            const ctx = canvas.getContext('2d')!
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (page as any).render({ canvasContext: ctx, viewport }).promise
+
+            // Convert to JPEG base64 (smaller than PNG)
+            const dataUrl = canvas.toDataURL('image/jpeg', 0.85)
+            const base64 = dataUrl.replace('data:image/jpeg;base64,', '')
+
+            const parseRes = await authFetch('/api/bank-statements/parse-page', {
               method: 'POST',
               headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ text }),
+              body: JSON.stringify({ image: base64, pageNum: i, totalPages: pdf.numPages }),
             })
             if (parseRes.ok) {
               const data = await parseRes.json()
               if (data.transactions?.length > 0) {
+                // Convert DD/MM/YYYY dates to YYYY-MM-DD
+                for (const t of data.transactions) {
+                  if (t.date && t.date.includes('/')) {
+                    const [d, m, y] = t.date.split('/')
+                    if (y && y.length === 4) t.date = `${y}-${m}-${d}`
+                  }
+                }
                 transactions = transactions.concat(data.transactions)
               }
             }

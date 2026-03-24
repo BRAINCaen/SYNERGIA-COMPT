@@ -42,11 +42,22 @@ export async function POST(
       return NextResponse.json({ error: 'Relevé non trouvé' }, { status: 404 })
     }
 
-    // Get all unmatched transactions for this statement
-    const transSnap = await adminDb
+    // Get all transactions for this statement (filter in JS to avoid composite index)
+    const allTransSnap = await adminDb
       .collection('bankTransactions')
       .where('statement_id', '==', params.id)
-      .where('match_status', '==', 'unmatched')
+      .get()
+    const transSnap = { docs: allTransSnap.docs.filter(d => d.data().match_status === 'unmatched'), size: 0 }
+    transSnap.size = transSnap.docs.length
+
+    // Load ALL invoices and revenue entries ONCE (avoid N+1 queries)
+    const allInvoicesSnap = await adminDb
+      .collection('invoices')
+      .where('user_id', '==', decoded.uid)
+      .get()
+    const allRevenueSnap = await adminDb
+      .collection('revenueEntries')
+      .where('user_id', '==', decoded.uid)
       .get()
 
     let matchedCount = 0
@@ -64,13 +75,11 @@ export async function POST(
         const txn = doc.data()
 
         if (txn.type === 'debit') {
-          // Try matching against invoices by amount (within 0.01 EUR tolerance)
-          const invoicesSnap = await adminDb
-            .collection('invoices')
-            .where('user_id', '==', decoded.uid)
-            .where('total_ttc', '>=', txn.amount - 0.01)
-            .where('total_ttc', '<=', txn.amount + 0.01)
-            .get()
+          // Match against pre-loaded invoices by amount (within 0.01 EUR)
+          const invoicesSnap = { docs: allInvoicesSnap.docs.filter(d => {
+            const ttc = d.data().total_ttc
+            return ttc != null && Math.abs(ttc - txn.amount) <= 0.01
+          })}
 
           // Filter by status and date proximity
           const validInvoices = invoicesSnap.docs.filter((invDoc) => {
@@ -125,13 +134,11 @@ export async function POST(
           // No match for debit
           unmatchedCount++
         } else if (txn.type === 'credit') {
-          // Try matching against revenue entries by amount
-          const revenueSnap = await adminDb
-            .collection('revenueEntries')
-            .where('user_id', '==', decoded.uid)
-            .where('amount_ttc', '>=', txn.amount - 0.01)
-            .where('amount_ttc', '<=', txn.amount + 0.01)
-            .get()
+          // Match against pre-loaded revenue entries by amount
+          const revenueSnap = { docs: allRevenueSnap.docs.filter(d => {
+            const ttc = d.data().amount_ttc
+            return ttc != null && Math.abs(ttc - txn.amount) <= 0.01
+          })}
 
           // Filter by date proximity
           const validRevenues = revenueSnap.docs.filter((revDoc) => {
