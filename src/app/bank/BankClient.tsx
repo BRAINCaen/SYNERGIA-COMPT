@@ -12,6 +12,7 @@ import {
   Trash2,
   Eye,
   Link,
+  Search,
   ArrowUpRight,
   ArrowDownRight,
   AlertTriangle,
@@ -24,7 +25,7 @@ interface BankStatement {
   transaction_count: number
   total_debits: number
   total_credits: number
-  status: 'parsed' | 'reconciling' | 'completed'
+  status: 'pending' | 'parsed' | 'reconciling' | 'completed' | 'error'
   created_at: string
 }
 
@@ -50,6 +51,7 @@ export default function BankClient() {
   const [uploadProgress, setUploadProgress] = useState(0)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
   const [reconciling, setReconciling] = useState<string | null>(null)
+  const [analyzing, setAnalyzing] = useState<string | null>(null)
 
   useEffect(() => {
     if (authLoading) return
@@ -148,6 +150,28 @@ export default function BankClient() {
     setIsDragOver(false)
   }, [])
 
+  const handleAnalyze = async (id: string) => {
+    setAnalyzing(id)
+    try {
+      const res = await authFetch(`/api/bank-statements/${id}/analyze`, {
+        method: 'POST',
+      })
+      if (res.ok) {
+        const data = await res.json()
+        setStatements((prev) =>
+          prev.map((s) =>
+            s.id === id
+              ? { ...s, status: 'parsed' as const, transaction_count: data.transaction_count, total_debits: data.total_debits, total_credits: data.total_credits }
+              : s
+          )
+        )
+      }
+    } catch (e) {
+      console.error('Analyze failed:', e)
+    }
+    setAnalyzing(null)
+  }
+
   const handleReconcile = async (id: string) => {
     setReconciling(id)
     try {
@@ -185,7 +209,9 @@ export default function BankClient() {
 
   const statusBadge = (status: BankStatement['status']) => {
     const map: Record<string, { bg: string; label: string }> = {
+      pending: { bg: 'bg-accent-orange/10 text-accent-orange', label: 'En attente' },
       parsed: { bg: 'bg-accent-blue/10 text-accent-blue', label: 'Analyse' },
+      error: { bg: 'bg-accent-red/10 text-accent-red', label: 'Erreur' },
       reconciling: { bg: 'bg-accent-orange/10 text-accent-orange', label: 'Rapprochement' },
       completed: { bg: 'bg-accent-green/10 text-accent-green', label: 'Termine' },
     }
@@ -350,6 +376,26 @@ export default function BankClient() {
 
                   <div className="flex items-center gap-2 shrink-0">
                     {statusBadge(st.status)}
+
+                    {st.status === 'pending' && (
+                      <button
+                        onClick={() => handleAnalyze(st.id)}
+                        disabled={analyzing === st.id}
+                        className="btn-primary flex items-center gap-1.5 text-xs disabled:opacity-50"
+                      >
+                        {analyzing === st.id ? (
+                          <>
+                            <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                            Analyse IA...
+                          </>
+                        ) : (
+                          <>
+                            <Search className="h-3.5 w-3.5" />
+                            Analyser
+                          </>
+                        )}
+                      </button>
+                    )}
 
                     {st.status === 'parsed' && (
                       <button
