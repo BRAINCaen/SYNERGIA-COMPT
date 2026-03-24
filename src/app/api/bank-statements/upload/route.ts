@@ -5,6 +5,8 @@ import { writeAuditLog } from '@/lib/audit'
 import { parseCSV, parseExcel, ParsedTransaction } from '@/lib/bank-parsers'
 import anthropic, { CLASSIFICATION_MODEL, MAX_TOKENS } from '@/lib/anthropic'
 
+export const maxDuration = 25 // Allow up to 25s for PDF parsing with Claude Vision
+
 const ALLOWED_EXTENSIONS = ['csv', 'xlsx', 'xls', 'pdf']
 const ALLOWED_TYPES = [
   'text/csv',
