@@ -153,25 +153,37 @@ export default function BankClient() {
   const handleAnalyze = async (id: string) => {
     setAnalyzing(id)
     try {
-      const st = statements.find(s => s.id === id)
-      if (!st) return
-
-      // Step 1: Get the file URL from statement details
+      // Step 1: Get file path
       const stmtRes = await authFetch(`/api/bank-statements/${id}`)
       if (!stmtRes.ok) throw new Error('Relevé non trouvé')
       const stmtData = await stmtRes.json()
 
-      // Step 2: Download the PDF via proxy using Firebase Storage path
+      // Step 2: Download PDF via proxy
       const proxyRes = await authFetch(`/api/proxy-pdf?path=${encodeURIComponent(stmtData.file_path)}`)
-      if (!proxyRes.ok) throw new Error('Impossible de télécharger le PDF')
-      const pdfBlob = await proxyRes.blob()
+      if (!proxyRes.ok) throw new Error('Téléchargement échoué')
+      const pdfBuffer = await proxyRes.arrayBuffer()
 
-      // Step 3: Send PDF to parse endpoint (just Claude call, no DB operations)
-      const formData = new FormData()
-      formData.append('file', pdfBlob, 'statement.pdf')
-      const parseRes = await authFetch('/api/bank-statements/parse-pdf', {
+      // Step 3: Extract text from PDF IN THE BROWSER using pdfjs-dist
+      const pdfjsLib = await import('pdfjs-dist')
+      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer), useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise
+      let fullText = ''
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i)
+        const content = await page.getTextContent()
+        const pageText = content.items.map((item: any) => item.str).join(' ')
+        fullText += pageText + '\n'
+      }
+
+      if (fullText.trim().length < 30) {
+        throw new Error('PDF illisible — aucun texte extractible')
+      }
+
+      // Step 4: Send extracted TEXT to API (no PDF, just text — fast)
+      const parseRes = await authFetch('/api/bank-statements/parse-text', {
         method: 'POST',
-        body: formData,
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ text: fullText }),
       })
       if (!parseRes.ok) {
         const err = await parseRes.json().catch(() => ({ error: 'Erreur IA' }))
@@ -180,10 +192,10 @@ export default function BankClient() {
       const { transactions } = await parseRes.json()
 
       if (!transactions || transactions.length === 0) {
-        throw new Error('Aucune transaction trouvée')
+        throw new Error('Aucune transaction trouvée dans le relevé')
       }
 
-      // Step 4: Save transactions to Firestore (separate fast call)
+      // Step 5: Save transactions
       const saveRes = await authFetch(`/api/bank-statements/${id}/save-transactions`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -208,7 +220,7 @@ export default function BankClient() {
       )
     } catch (e) {
       console.error('Analyze failed:', e)
-      alert(`Erreur d'analyse : ${e instanceof Error ? e.message : 'Erreur inconnue'}`)
+      alert(`Erreur : ${e instanceof Error ? e.message : 'Erreur inconnue'}`)
     }
     setAnalyzing(null)
   }
