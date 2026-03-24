@@ -165,8 +165,8 @@ export default function BankClient() {
 
       // Step 3: Extract text from PDF IN THE BROWSER using pdfjs-dist
       const pdfjsLib = await import('pdfjs-dist')
-      pdfjsLib.GlobalWorkerOptions.workerSrc = ''
-      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer), useWorkerFetch: false, isEvalSupported: false, useSystemFonts: true }).promise
+      pdfjsLib.GlobalWorkerOptions.workerSrc = `//cdnjs.cloudflare.com/ajax/libs/pdf.js/${pdfjsLib.version}/pdf.worker.min.mjs`
+      const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) }).promise
       let fullText = ''
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i)
