@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
+import { adminStorage } from '@/lib/firebase/admin'
 
 export const dynamic = 'force-dynamic'
 
@@ -10,27 +11,33 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
     }
 
+    // Support both: ?url=... (signed URL) and ?path=... (Firebase Storage path)
     const url = request.nextUrl.searchParams.get('url')
-    if (!url) {
-      return NextResponse.json({ error: 'URL manquante' }, { status: 400 })
+    const path = request.nextUrl.searchParams.get('path')
+
+    let data: Buffer | Uint8Array
+
+    if (path) {
+      // Download from Firebase Storage using Admin SDK
+      const bucket = adminStorage.bucket()
+      const fileRef = bucket.file(path)
+      const [fileBuffer] = await fileRef.download()
+      data = fileBuffer
+    } else if (url) {
+      // Download from URL (for signed URLs from invoice fileUrl)
+      const response = await fetch(url)
+      if (!response.ok) {
+        return NextResponse.json({ error: 'Impossible de télécharger le PDF' }, { status: 502 })
+      }
+      data = new Uint8Array(await response.arrayBuffer())
+    } else {
+      return NextResponse.json({ error: 'Paramètre url ou path requis' }, { status: 400 })
     }
 
-    // Only allow Firebase Storage URLs
-    if (!url.includes('firebasestorage.googleapis.com') && !url.includes('storage.googleapis.com')) {
-      return NextResponse.json({ error: 'URL non autorisée' }, { status: 403 })
-    }
-
-    const response = await fetch(url)
-    if (!response.ok) {
-      return NextResponse.json({ error: 'Impossible de télécharger le PDF' }, { status: 502 })
-    }
-
-    const buffer = await response.arrayBuffer()
-
-    return new NextResponse(buffer, {
+    return new NextResponse(data as unknown as BodyInit, {
       headers: {
         'Content-Type': 'application/pdf',
-        'Content-Length': String(buffer.byteLength),
+        'Content-Length': String(data.length),
         'Cache-Control': 'private, max-age=3600',
       },
     })

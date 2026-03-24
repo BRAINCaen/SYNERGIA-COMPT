@@ -161,10 +161,8 @@ export default function BankClient() {
       if (!stmtRes.ok) throw new Error('Relevé non trouvé')
       const stmtData = await stmtRes.json()
 
-      // Step 2: Download the PDF via proxy
-      const bucket = stmtData.file_path
-      const downloadUrl = `https://firebasestorage.googleapis.com/v0/b/synergia-compt.firebasestorage.app/o/${encodeURIComponent(bucket)}?alt=media`
-      const proxyRes = await authFetch(`/api/proxy-pdf?url=${encodeURIComponent(downloadUrl)}`)
+      // Step 2: Download the PDF via proxy using Firebase Storage path
+      const proxyRes = await authFetch(`/api/proxy-pdf?path=${encodeURIComponent(stmtData.file_path)}`)
       if (!proxyRes.ok) throw new Error('Impossible de télécharger le PDF')
       const pdfBlob = await proxyRes.blob()
 
