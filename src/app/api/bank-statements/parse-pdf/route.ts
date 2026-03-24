@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import anthropic, { FAST_MODEL } from '@/lib/anthropic'
-// @ts-expect-error pdf-parse has no types
-import pdfParse from 'pdf-parse'
+// @ts-expect-error pdf-parse/lib/pdf-parse.js skips the test file import that breaks in serverless
+import pdfParse from 'pdf-parse/lib/pdf-parse.js'
 
 export const dynamic = 'force-dynamic'
 
