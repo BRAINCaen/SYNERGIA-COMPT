@@ -151,7 +151,29 @@ export default function PersonnelClient() {
   }, [user, selectedMonth])
 
   useEffect(() => {
-    if (!authLoading && user) fetchPayslips()
+    if (!authLoading && user) {
+      fetchPayslips()
+      // Check bank transactions for matches made from bank side
+      const loadBankMatches = async () => {
+        try {
+          const res = await authFetch('/api/bank-statements/transactions?match_status=matched')
+          if (res.ok) {
+            const data = await res.json()
+            const txs = data.transactions || data || []
+            const matched: Record<string, string[]> = {}
+            for (const tx of txs) {
+              if (tx.matched_invoice_id) {
+                // Payslips are stored with matched_invoice_id
+                if (!matched[tx.matched_invoice_id]) matched[tx.matched_invoice_id] = []
+                matched[tx.matched_invoice_id].push(tx.id)
+              }
+            }
+            setBankMatchedPayslips(prev => ({ ...prev, ...matched }))
+          }
+        } catch { /* non-blocking */ }
+      }
+      loadBankMatches()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user, selectedMonth])
 

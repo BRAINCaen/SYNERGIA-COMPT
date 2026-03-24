@@ -152,7 +152,28 @@ export default function RevenueClient() {
   }, [user, selectedMonth])
 
   useEffect(() => {
-    if (!authLoading && user) fetchEntries()
+    if (!authLoading && user) {
+      fetchEntries()
+      // Also check bank transactions for matches made from the bank side
+      const loadBankMatches = async () => {
+        try {
+          const res = await authFetch('/api/bank-statements/transactions?match_status=matched')
+          if (res.ok) {
+            const data = await res.json()
+            const txs = data.transactions || data || []
+            const matchedFromBank: Record<string, string[]> = {}
+            for (const tx of txs) {
+              if (tx.matched_revenue_id) {
+                if (!matchedFromBank[tx.matched_revenue_id]) matchedFromBank[tx.matched_revenue_id] = []
+                matchedFromBank[tx.matched_revenue_id].push(tx.id)
+              }
+            }
+            setBankMatchedEntries(prev => ({ ...prev, ...matchedFromBank }))
+          }
+        } catch { /* non-blocking */ }
+      }
+      loadBankMatches()
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [authLoading, user, selectedMonth])
 
