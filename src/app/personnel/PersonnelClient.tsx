@@ -215,7 +215,13 @@ export default function PersonnelClient() {
     const startIdx = uploadingFiles.length
     const newFiles: UploadingFile[] = arr.map(f => ({ file: f, status: 'uploading' as const, progress: 10 }))
     setUploadingFiles(prev => [...prev, ...newFiles])
-    arr.forEach((f, i) => processFile(f, startIdx + i))
+    const processSequentially = async () => {
+      for (let i = 0; i < arr.length; i++) {
+        await processFile(arr[i], startIdx + i)
+        if (i < arr.length - 1) await new Promise(r => setTimeout(r, 2000))
+      }
+    }
+    processSequentially()
   }
 
   const handleDrop = useCallback((e: React.DragEvent) => {

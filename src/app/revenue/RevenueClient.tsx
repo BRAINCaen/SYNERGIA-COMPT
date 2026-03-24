@@ -268,7 +268,14 @@ export default function RevenueClient() {
       progress: 10,
     }))
     setUploadingFiles((prev) => [...prev, ...newFiles])
-    arr.forEach((f, i) => processFile(f, startIdx + i))
+    // Process sequentially with delay to avoid rate limits
+    const processSequentially = async () => {
+      for (let i = 0; i < arr.length; i++) {
+        await processFile(arr[i], startIdx + i)
+        if (i < arr.length - 1) await new Promise(r => setTimeout(r, 2000))
+      }
+    }
+    processSequentially()
   }
 
   const handleDrop = useCallback(
