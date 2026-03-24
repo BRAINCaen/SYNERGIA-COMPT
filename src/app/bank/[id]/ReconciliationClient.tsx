@@ -512,23 +512,35 @@ export default function ReconciliationClient({ statementId }: { statementId: str
         </div>
 
         {/* Filter tabs */}
-        <div className="flex flex-wrap gap-2">
-          {tabs.map((tab) => (
-            <button
-              key={tab.key}
-              onClick={() => setActiveTab(tab.key)}
-              className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                activeTab === tab.key
-                  ? 'bg-accent-green/10 text-accent-green'
-                  : 'bg-dark-card text-gray-400 hover:bg-dark-hover hover:text-gray-200'
-              }`}
-            >
-              {tab.label}
-              {tab.count != null && (
-                <span className="ml-1.5 font-mono text-xs opacity-70">{tab.count}</span>
-              )}
-            </button>
-          ))}
+        <div className="flex items-center gap-4 flex-wrap">
+          <div className="flex flex-wrap gap-2">
+            {tabs.map((tab) => (
+              <button
+                key={tab.key}
+                onClick={() => setActiveTab(tab.key)}
+                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
+                  activeTab === tab.key
+                    ? 'bg-accent-green/10 text-accent-green'
+                    : 'bg-dark-card text-gray-400 hover:bg-dark-hover hover:text-gray-200'
+                }`}
+              >
+                {tab.label}
+                {tab.count != null && (
+                  <span className="ml-1.5 font-mono text-xs opacity-70">{tab.count}</span>
+                )}
+              </button>
+            ))}
+          </div>
+          <div className="relative ml-auto">
+            <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+            <input
+              type="text"
+              value={txSearch}
+              onChange={(e) => setTxSearch(e.target.value)}
+              placeholder="Rechercher..."
+              className="input-field w-48 pl-9 text-sm"
+            />
+          </div>
         </div>
 
         {/* Transactions table */}

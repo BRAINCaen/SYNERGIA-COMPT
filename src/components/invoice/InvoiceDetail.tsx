@@ -502,8 +502,154 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
               PDF annote
             </button>
           )}
+          <button
+            onClick={async () => {
+              if (showBankMatch) {
+                setShowBankMatch(false)
+                return
+              }
+              setShowBankMatch(true)
+              setBankSearching(true)
+              try {
+                const res = await authFetch('/api/bank-statements/transactions?match_status=unmatched')
+                if (res.ok) {
+                  const data = await res.json()
+                  setBankTransactions(data.transactions || data || [])
+                }
+              } catch (e) {
+                console.error('Fetch bank transactions error:', e)
+              }
+              setBankSearching(false)
+            }}
+            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+              bankMatched
+                ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
+                : 'border-accent-green/30 bg-dark-card text-accent-green hover:bg-accent-green/10'
+            }`}
+          >
+            <Landmark className="h-4 w-4" />
+            {bankMatched ? 'Rapproche' : 'Rapprocher'}
+          </button>
         </div>
       </div>
+
+      {/* Bank match badge */}
+      {bankMatched && !showBankMatch && (
+        <div className="flex items-center gap-2 rounded-lg border border-accent-green/30 bg-accent-green/5 px-4 py-2">
+          <CheckCircle className="h-4 w-4 text-accent-green" />
+          <span className="text-sm text-accent-green font-medium">Transaction bancaire rapprochee</span>
+          <span className="text-xs text-gray-500 font-mono ml-2">ID: {bankMatched}</span>
+        </div>
+      )}
+
+      {/* Bank match section */}
+      {showBankMatch && (
+        <div className="card space-y-4">
+          <div className="flex items-center justify-between">
+            <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Rapprochement bancaire</h3>
+            <button onClick={() => setShowBankMatch(false)} className="rounded p-1 text-gray-500 hover:bg-dark-hover hover:text-gray-200">
+              <ArrowLeft className="h-4 w-4" />
+            </button>
+          </div>
+
+          {bankSearching ? (
+            <div className="flex h-24 items-center justify-center">
+              <Loader2 className="h-6 w-6 animate-spin text-accent-green" />
+            </div>
+          ) : (() => {
+            const bankSearch = (document.getElementById('bank-match-search') as HTMLInputElement)?.value?.toLowerCase() || ''
+            const ttc = invoice.total_ttc || 0
+            const matchingTx = bankTransactions
+              .filter((tx: any) => Math.abs(tx.amount - ttc) <= 1)
+              .sort((a: any, b: any) => Math.abs(a.amount - ttc) - Math.abs(b.amount - ttc))
+            const otherTx = bankTransactions.filter((tx: any) => Math.abs(tx.amount - ttc) > 1)
+            const allSorted = [...matchingTx, ...otherTx]
+            const filtered = bankSearch
+              ? allSorted.filter((tx: any) => (tx.label || '').toLowerCase().includes(bankSearch))
+              : allSorted
+
+            return (
+              <>
+                <div className="relative">
+                  <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                  <input
+                    id="bank-match-search"
+                    type="text"
+                    placeholder="Rechercher par libelle..."
+                    onChange={() => {
+                      // Force re-render by toggling a dummy state
+                      setBankTransactions([...bankTransactions])
+                    }}
+                    className="input-field w-full pl-9 text-sm"
+                  />
+                </div>
+
+                {matchingTx.length > 0 && (
+                  <div>
+                    <p className="text-xs font-medium text-accent-green mb-2">
+                      Montants correspondants ({formatAmount(ttc)} +/- 1 EUR)
+                    </p>
+                  </div>
+                )}
+
+                <div className="max-h-64 space-y-1 overflow-y-auto">
+                  {filtered.length === 0 && (
+                    <p className="py-6 text-center text-sm text-gray-500">Aucune transaction non rapprochee trouvee.</p>
+                  )}
+                  {filtered.map((tx: any) => {
+                    const isMatch = Math.abs(tx.amount - ttc) <= 1
+                    return (
+                      <button
+                        key={tx.id}
+                        onClick={async () => {
+                          try {
+                            const res = await authFetch(`/api/bank-statements/${tx.statement_id}/match`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ transaction_id: tx.id, invoice_id: invoiceId }),
+                            })
+                            if (res.ok) {
+                              setBankMatched(tx.id)
+                              setShowBankMatch(false)
+                              setBankTransactions((prev) => prev.filter((t: any) => t.id !== tx.id))
+                            }
+                          } catch (e) {
+                            console.error('Match error:', e)
+                          }
+                        }}
+                        className={`w-full rounded-lg border p-3 text-left transition-all hover:border-accent-green/50 hover:bg-accent-green/5 ${
+                          isMatch ? 'border-accent-green/30 bg-accent-green/5' : 'border-dark-border bg-dark-input'
+                        }`}
+                      >
+                        <div className="flex items-center justify-between">
+                          <div className="min-w-0">
+                            <p className="truncate text-sm text-gray-200">{tx.label}</p>
+                            <p className="text-xs text-gray-500 font-mono">
+                              {tx.date ? new Date(tx.date).toLocaleDateString('fr-FR') : '-'}
+                            </p>
+                          </div>
+                          <div className="shrink-0 ml-3">
+                            <span className={`font-mono text-sm font-medium ${
+                              tx.type === 'debit' ? 'text-accent-red' : 'text-accent-green'
+                            }`}>
+                              {tx.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' \u20AC'}
+                            </span>
+                            {isMatch && (
+                              <span className="ml-2 rounded bg-accent-green/10 px-1.5 py-0.5 text-[10px] font-medium text-accent-green">
+                                MATCH
+                              </span>
+                            )}
+                          </div>
+                        </div>
+                      </button>
+                    )
+                  })}
+                </div>
+              </>
+            )
+          })()}
+        </div>
+      )}
 
       {lowConfidenceLines.length > 0 && invoice.status === 'classified' && (
         <div className="flex items-start gap-3 rounded-lg border border-accent-orange/30 bg-accent-orange/10 p-4">

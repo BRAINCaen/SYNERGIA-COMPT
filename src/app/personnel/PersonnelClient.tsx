@@ -1,11 +1,11 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback } from 'react'
 import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import AppLayout from '@/components/layout/AppLayout'
 import { useRouter } from 'next/navigation'
 import {
-  Users, Upload, FileText, Loader2, Trash2, Check, AlertTriangle,
+  Users, Upload, FileText, Loader2, Trash2, Check, AlertTriangle, Landmark, Search, X, CheckCircle,
 } from 'lucide-react'
 
 interface PayslipData {
@@ -87,6 +87,54 @@ export default function PersonnelClient() {
   const [loading, setLoading] = useState(true)
   const [uploadingFiles, setUploadingFiles] = useState<UploadingFile[]>([])
   const [isDragOver, setIsDragOver] = useState(false)
+  const [bankMatchPayslipId, setBankMatchPayslipId] = useState<string | null>(null)
+  const [bankTransactions, setBankTransactions] = useState<any[]>([])
+  const [bankSearching, setBankSearching] = useState(false)
+  const [bankSearch, setBankSearch] = useState('')
+  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([])
+  const [bankMatchedPayslips, setBankMatchedPayslips] = useState<Record<string, string[]>>({})
+  const [bankMatching, setBankMatching] = useState(false)
+
+  const openBankMatch = async (payslipId: string) => {
+    if (bankMatchPayslipId === payslipId) {
+      setBankMatchPayslipId(null)
+      return
+    }
+    setBankMatchPayslipId(payslipId)
+    setSelectedTxIds([])
+    setBankSearch('')
+    setBankSearching(true)
+    try {
+      const res = await authFetch('/api/bank-statements/transactions?match_status=unmatched')
+      if (res.ok) {
+        const data = await res.json()
+        setBankTransactions(data.transactions || data || [])
+      }
+    } catch (e) {
+      console.error('Fetch bank transactions error:', e)
+    }
+    setBankSearching(false)
+  }
+
+  const handleBankMatch = async (payslipId: string) => {
+    if (selectedTxIds.length === 0) return
+    setBankMatching(true)
+    try {
+      const res = await authFetch(`/api/payslips/${payslipId}/match-transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transaction_ids: selectedTxIds }),
+      })
+      if (res.ok) {
+        setBankMatchedPayslips((prev) => ({ ...prev, [payslipId]: selectedTxIds }))
+        setBankMatchPayslipId(null)
+        setSelectedTxIds([])
+      }
+    } catch (e) {
+      console.error('Match error:', e)
+    }
+    setBankMatching(false)
+  }
 
   const fetchPayslips = useCallback(async () => {
     if (!user) return
@@ -298,7 +346,8 @@ export default function PersonnelClient() {
                 </thead>
                 <tbody>
                   {payslips.map((p) => (
-                    <tr key={p.id} className="border-b border-dark-border/50 hover:bg-dark-hover/30">
+                    <React.Fragment key={p.id}>
+                    <tr className="border-b border-dark-border/50 hover:bg-dark-hover/30">
                       <td className="px-4 py-3">
                         <p className="font-medium text-gray-200">{p.employee_name}</p>
                         {p.employee_role && <p className="text-xs text-gray-500">{p.employee_role}</p>}
@@ -311,11 +360,152 @@ export default function PersonnelClient() {
                       <td className="px-4 py-3 text-right font-mono text-purple-400">{fmt(p.remaining_salary)}</td>
                       <td className="px-4 py-3"><span className="text-xs text-gray-400 truncate block max-w-[120px]">{p.file_name || '-'}</span></td>
                       <td className="px-4 py-3 text-right">
-                        <button onClick={() => handleDelete(p.id)} className="rounded p-1 text-gray-500 hover:bg-accent-red/10 hover:text-accent-red">
-                          <Trash2 className="h-4 w-4" />
-                        </button>
+                        <div className="flex items-center justify-end gap-1">
+                          {bankMatchedPayslips[p.id] ? (
+                            <span className="flex items-center gap-1 rounded bg-accent-green/10 px-2 py-1 text-[10px] font-medium text-accent-green">
+                              <CheckCircle className="h-3 w-3" /> Rapproche
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => openBankMatch(p.id)}
+                              className={`flex items-center gap-1 rounded px-2 py-1 text-xs font-medium transition-colors ${
+                                bankMatchPayslipId === p.id
+                                  ? 'bg-accent-green/10 text-accent-green'
+                                  : 'text-accent-green hover:bg-accent-green/10'
+                              }`}
+                            >
+                              <Landmark className="h-3.5 w-3.5" />
+                              Rapprocher
+                            </button>
+                          )}
+                          <button onClick={() => handleDelete(p.id)} className="rounded p-1 text-gray-500 hover:bg-accent-red/10 hover:text-accent-red">
+                            <Trash2 className="h-4 w-4" />
+                          </button>
+                        </div>
                       </td>
                     </tr>
+                    {bankMatchPayslipId === p.id && (
+                      <tr>
+                        <td colSpan={9} className="border-b border-dark-border/50 bg-dark-input/30 px-4 py-4">
+                          <div className="space-y-3">
+                            <div className="flex items-center justify-between">
+                              <h4 className="text-xs font-semibold uppercase tracking-wider text-gray-500">
+                                Rapprochement bancaire — {p.employee_name}
+                              </h4>
+                              <button onClick={() => setBankMatchPayslipId(null)} className="rounded p-1 text-gray-500 hover:bg-dark-hover hover:text-gray-200">
+                                <X className="h-4 w-4" />
+                              </button>
+                            </div>
+
+                            {bankSearching ? (
+                              <div className="flex h-16 items-center justify-center">
+                                <Loader2 className="h-5 w-5 animate-spin text-accent-green" />
+                              </div>
+                            ) : (() => {
+                              const amounts = [p.advance_amount, p.remaining_salary, p.net_after_tax || p.net_salary].filter(a => a > 0)
+                              const matchingTx = bankTransactions.filter((tx: any) =>
+                                amounts.some(amt => Math.abs(tx.amount - amt) <= 1)
+                              ).sort((a: any, b: any) => {
+                                const aDist = Math.min(...amounts.map(amt => Math.abs(a.amount - amt)))
+                                const bDist = Math.min(...amounts.map(amt => Math.abs(b.amount - amt)))
+                                return aDist - bDist
+                              })
+                              const otherTx = bankTransactions.filter((tx: any) =>
+                                !amounts.some(amt => Math.abs(tx.amount - amt) <= 1)
+                              )
+                              const allSorted = [...matchingTx, ...otherTx]
+                              const filtered = bankSearch
+                                ? allSorted.filter((tx: any) => (tx.label || '').toLowerCase().includes(bankSearch.toLowerCase()))
+                                : allSorted
+
+                              return (
+                                <>
+                                  <div className="flex items-center gap-2 text-xs text-gray-500">
+                                    <span>Montants recherches :</span>
+                                    {p.advance_amount > 0 && <span className="rounded bg-accent-blue/10 px-1.5 py-0.5 font-mono text-accent-blue">Acompte {fmt(p.advance_amount)}</span>}
+                                    {p.remaining_salary > 0 && <span className="rounded bg-purple-500/10 px-1.5 py-0.5 font-mono text-purple-400">Solde {fmt(p.remaining_salary)}</span>}
+                                    <span className="rounded bg-accent-green/10 px-1.5 py-0.5 font-mono text-accent-green">Net {fmt(p.net_after_tax || p.net_salary)}</span>
+                                  </div>
+
+                                  <div className="relative">
+                                    <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                                    <input
+                                      type="text"
+                                      value={bankSearch}
+                                      onChange={(e) => setBankSearch(e.target.value)}
+                                      placeholder="Rechercher par libelle..."
+                                      className="input-field w-full pl-9 text-sm"
+                                    />
+                                  </div>
+
+                                  <div className="max-h-48 space-y-1 overflow-y-auto">
+                                    {filtered.length === 0 && (
+                                      <p className="py-4 text-center text-sm text-gray-500">Aucune transaction non rapprochee.</p>
+                                    )}
+                                    {filtered.map((tx: any) => {
+                                      const isAmountMatch = amounts.some(amt => Math.abs(tx.amount - amt) <= 1)
+                                      const isSelected = selectedTxIds.includes(tx.id)
+                                      return (
+                                        <label
+                                          key={tx.id}
+                                          className={`flex cursor-pointer items-center gap-3 rounded-lg border p-2 transition-all hover:border-accent-green/50 ${
+                                            isSelected ? 'border-accent-green/50 bg-accent-green/5' : isAmountMatch ? 'border-accent-green/20 bg-accent-green/5' : 'border-dark-border bg-dark-card'
+                                          }`}
+                                        >
+                                          <input
+                                            type="checkbox"
+                                            checked={isSelected}
+                                            onChange={() => {
+                                              setSelectedTxIds((prev) =>
+                                                prev.includes(tx.id) ? prev.filter((id) => id !== tx.id) : [...prev, tx.id]
+                                              )
+                                            }}
+                                            className="h-4 w-4 rounded border-dark-border bg-dark-input text-accent-green focus:ring-accent-green/50"
+                                          />
+                                          <div className="min-w-0 flex-1">
+                                            <p className="truncate text-sm text-gray-200">{tx.label}</p>
+                                            <p className="text-xs text-gray-500 font-mono">
+                                              {tx.date ? new Date(tx.date).toLocaleDateString('fr-FR') : '-'}
+                                            </p>
+                                          </div>
+                                          <div className="shrink-0 text-right">
+                                            <span className={`font-mono text-sm font-medium ${
+                                              tx.type === 'debit' ? 'text-accent-red' : 'text-accent-green'
+                                            }`}>
+                                              {tx.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' \u20AC'}
+                                            </span>
+                                            {isAmountMatch && (
+                                              <span className="ml-2 rounded bg-accent-green/10 px-1.5 py-0.5 text-[10px] font-medium text-accent-green">
+                                                MATCH
+                                              </span>
+                                            )}
+                                          </div>
+                                        </label>
+                                      )
+                                    })}
+                                  </div>
+
+                                  {selectedTxIds.length > 0 && (
+                                    <div className="flex items-center justify-end gap-2">
+                                      <span className="text-xs text-gray-500">{selectedTxIds.length} transaction(s) selectionnee(s)</span>
+                                      <button
+                                        onClick={() => handleBankMatch(p.id)}
+                                        disabled={bankMatching}
+                                        className="flex items-center gap-1.5 rounded-lg bg-accent-green px-3 py-1.5 text-xs font-semibold text-dark-bg hover:bg-accent-green/90 transition-colors disabled:opacity-50"
+                                      >
+                                        {bankMatching ? <Loader2 className="h-3 w-3 animate-spin" /> : <Check className="h-3 w-3" />}
+                                        Confirmer le rapprochement
+                                      </button>
+                                    </div>
+                                  )}
+                                </>
+                              )
+                            })()}
+                          </div>
+                        </td>
+                      </tr>
+                    )}
+                    </React.Fragment>
                   ))}
                   <tr className="border-t-2 border-dark-border bg-dark-input/30 font-bold">
                     <td className="px-4 py-3 text-gray-300" colSpan={2}>TOTAL ({payslips.length} bulletins)</td>
