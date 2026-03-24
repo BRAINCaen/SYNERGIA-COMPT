@@ -18,17 +18,25 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Texte trop court' }, { status: 400 })
     }
 
+    // Send the text chunk (client handles splitting if needed)
+    const chunk = text.substring(0, 30000) // Allow bigger chunks
+
     const response = await anthropic.messages.create({
       model: FAST_MODEL,
-      max_tokens: 8192,
+      max_tokens: 16384,
       messages: [{
         role: 'user',
-        content: `Extrais les transactions de ce relevé bancaire.
-Réponds UNIQUEMENT en JSON: [{"date":"YYYY-MM-DD","label":"libellé","debit":nombre_ou_null,"credit":nombre_ou_null}]
-Règles: dates JJ/MM/AAAA → YYYY-MM-DD. Montants en nombres sans €. Exclure soldes/totaux.
+        content: `Extrais TOUTES les transactions de ce relevé bancaire. Il peut y avoir beaucoup de transactions sur plusieurs pages.
+Réponds UNIQUEMENT en JSON: [{"date":"YYYY-MM-DD","label":"libellé simplifié","debit":nombre_ou_null,"credit":nombre_ou_null}]
+Règles:
+- Dates JJ/MM/AAAA → YYYY-MM-DD
+- Montants en nombres (pas de €, pas d'espaces). Utilise le point comme séparateur décimal.
+- Exclure: soldes, totaux, en-têtes, pieds de page
+- Pour les labels: garder UNIQUEMENT la première ligne descriptive (pas les références ICS/RUM/numéros de compte)
+- REMCB = remise carte bancaire (crédit), COMCB = commission carte (débit), PRLV = prélèvement (débit), VIR = virement
 
-TEXTE:
-${text.substring(0, 15000)}`
+TEXTE DU RELEVÉ:
+${chunk}`
       }],
     })
 

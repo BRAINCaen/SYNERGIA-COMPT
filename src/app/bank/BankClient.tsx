@@ -179,19 +179,40 @@ export default function BankClient() {
         throw new Error('PDF illisible — aucun texte extractible')
       }
 
-      // Step 4: Send extracted TEXT to API (no PDF, just text — fast)
-      const parseRes = await authFetch('/api/bank-statements/parse-text', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ text: fullText }),
-      })
-      if (!parseRes.ok) {
-        const err = await parseRes.json().catch(() => ({ error: 'Erreur IA' }))
-        throw new Error(err.error || 'Erreur de parsing')
+      // Step 4: Split text into chunks and send each to API
+      const CHUNK_SIZE = 28000
+      const chunks: string[] = []
+      for (let i = 0; i < fullText.length; i += CHUNK_SIZE) {
+        chunks.push(fullText.substring(i, i + CHUNK_SIZE))
       }
-      const { transactions } = await parseRes.json()
 
-      if (!transactions || transactions.length === 0) {
+      let allTransactions: any[] = []
+      for (let c = 0; c < chunks.length; c++) {
+        const parseRes = await authFetch('/api/bank-statements/parse-text', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ text: chunks[c] }),
+        })
+        if (!parseRes.ok) {
+          const err = await parseRes.json().catch(() => ({ error: 'Erreur IA' }))
+          throw new Error(err.error || `Erreur parsing morceau ${c + 1}/${chunks.length}`)
+        }
+        const data = await parseRes.json()
+        if (data.transactions && data.transactions.length > 0) {
+          allTransactions = allTransactions.concat(data.transactions)
+        }
+      }
+
+      // Deduplicate by date+label+amount
+      const seen = new Set<string>()
+      const transactions = allTransactions.filter((t: any) => {
+        const key = `${t.date}|${t.label}|${t.debit || ''}|${t.credit || ''}`
+        if (seen.has(key)) return false
+        seen.add(key)
+        return true
+      })
+
+      if (transactions.length === 0) {
         throw new Error('Aucune transaction trouvée dans le relevé')
       }
 
