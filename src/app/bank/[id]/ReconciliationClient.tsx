@@ -85,6 +85,8 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [loadingPreview, setLoadingPreview] = useState(false)
   const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([])
   const [matchingMulti, setMatchingMulti] = useState(false)
+  const [selectedTxIds, setSelectedTxIds] = useState<string[]>([])
+  const [multiMatchModal, setMultiMatchModal] = useState(false)
 
   // Close ignore dropdown on outside click
   useEffect(() => {
@@ -302,6 +304,32 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     } catch (e) {
       console.error('Unmatch error:', e)
     }
+  }
+
+  const openMultiMatchModal = () => {
+    if (selectedTxIds.length === 0) return
+    setMultiMatchModal(true)
+    setSearchQuery('')
+    setSearchResults([])
+    setSelectedCandidateIds([])
+    setSearching(true)
+    // Load invoices sorted by total amount of selected transactions
+    const totalAmount = selectedTxIds.reduce((sum, id) => {
+      const tx = transactions.find(t => t.id === id)
+      return sum + (tx?.debit || tx?.credit || 0)
+    }, 0)
+    authFetch(`/api/invoices/search?amount=${totalAmount}`)
+      .then(res => res.ok ? res.json() : { invoices: [] })
+      .then(data => {
+        const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
+          id: inv.id, type: inv.document_type === 'revenue' ? 'revenue' : 'invoice',
+          name: inv.supplier_name || inv.file_name || 'Sans nom',
+          amount: inv.total_ttc || 0, date: inv.invoice_date || '', file_name: inv.file_name || '',
+        }))
+        setSearchResults(results)
+      })
+      .catch(() => {})
+      .finally(() => setSearching(false))
   }
 
   const openMatchModal = async (tx: Transaction) => {
@@ -551,6 +579,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-dark-border text-left">
+                <th className="w-8 px-2 py-3"></th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Date
                 </th>
@@ -574,7 +603,19 @@ export default function ReconciliationClient({ statementId }: { statementId: str
             <tbody className="divide-y divide-dark-border">
               {filteredTransactions.length > 0 ? (
                 filteredTransactions.map((tx) => (
-                  <tr key={tx.id} className="hover:bg-dark-hover transition-colors">
+                  <tr key={tx.id} className={`hover:bg-dark-hover transition-colors ${selectedTxIds.includes(tx.id) ? 'bg-accent-green/5' : ''}`}>
+                    <td className="w-8 px-2 py-3">
+                      {tx.status === 'unmatched' && (
+                        <input
+                          type="checkbox"
+                          checked={selectedTxIds.includes(tx.id)}
+                          onChange={() => setSelectedTxIds(prev =>
+                            prev.includes(tx.id) ? prev.filter(id => id !== tx.id) : [...prev, tx.id]
+                          )}
+                          className="h-4 w-4 rounded border-dark-border bg-dark-input text-accent-green focus:ring-accent-green/50 cursor-pointer"
+                        />
+                      )}
+                    </td>
                     <td className="whitespace-nowrap px-4 py-3 font-mono text-sm text-gray-300">
                       {tx.date
                         ? new Date(tx.date).toLocaleDateString('fr-FR')
@@ -685,6 +726,34 @@ export default function ReconciliationClient({ statementId }: { statementId: str
             </tbody>
           </table>
         </div>
+
+        {/* Floating bar when transactions are selected */}
+        {selectedTxIds.length > 0 && (
+          <div className="sticky bottom-4 mx-auto flex w-fit items-center gap-3 rounded-xl border border-accent-green/30 bg-dark-card px-5 py-3 shadow-2xl">
+            <span className="text-sm text-gray-300">
+              <span className="font-bold text-accent-green">{selectedTxIds.length}</span> ligne(s) selectionnee(s)
+              <span className="ml-2 font-mono text-xs text-gray-500">
+                ({fmt(selectedTxIds.reduce((s, id) => {
+                  const tx = transactions.find(t => t.id === id)
+                  return s + (tx?.debit || tx?.credit || 0)
+                }, 0))})
+              </span>
+            </span>
+            <button
+              onClick={openMultiMatchModal}
+              className="flex items-center gap-1.5 rounded-lg bg-accent-green px-4 py-2 text-sm font-semibold text-dark-bg hover:bg-accent-green/90"
+            >
+              <Link className="h-4 w-4" />
+              Pointer la selection
+            </button>
+            <button
+              onClick={() => setSelectedTxIds([])}
+              className="rounded-lg p-1.5 text-gray-400 hover:bg-dark-hover hover:text-gray-200"
+            >
+              <X className="h-4 w-4" />
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Manual match modal */}
@@ -828,6 +897,79 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                   </button>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Multi-match modal: several transactions → one invoice */}
+      {multiMatchModal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-lg rounded-xl border border-dark-border bg-dark-card shadow-2xl">
+            <div className="flex items-center justify-between border-b border-dark-border px-6 py-4">
+              <div>
+                <h3 className="text-base font-semibold text-white">Pointer {selectedTxIds.length} transactions</h3>
+                <p className="mt-0.5 text-xs font-mono text-gray-400">
+                  Total: {fmt(selectedTxIds.reduce((s, id) => { const tx = transactions.find(t => t.id === id); return s + (tx?.debit || tx?.credit || 0) }, 0))}
+                </p>
+              </div>
+              <button onClick={() => setMultiMatchModal(false)} className="rounded-lg p-1.5 text-gray-400 hover:bg-dark-hover hover:text-gray-200">
+                <X className="h-5 w-5" />
+              </button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="relative">
+                <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-500" />
+                <input
+                  type="text"
+                  value={searchQuery}
+                  onChange={(e) => handleSearch(e.target.value)}
+                  placeholder="Rechercher une facture..."
+                  className="input-field w-full pl-10 text-sm"
+                  autoFocus
+                />
+              </div>
+              <div className="max-h-64 space-y-1.5 overflow-y-auto">
+                {searchResults.map((candidate) => (
+                  <button
+                    key={candidate.id}
+                    onClick={async () => {
+                      setMatchingMulti(true)
+                      try {
+                        for (const txId of selectedTxIds) {
+                          const tx = transactions.find(t => t.id === txId)
+                          if (!tx) continue
+                          const body: Record<string, string> = { transaction_id: txId }
+                          if (candidate.type === 'invoice') body.invoice_id = candidate.id
+                          else body.revenue_id = candidate.id
+                          await authFetch(`/api/bank-statements/${statementId}/match`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body),
+                          })
+                        }
+                        setMultiMatchModal(false)
+                        setSelectedTxIds([])
+                        await fetchData()
+                      } catch (e) { console.error('Multi match error:', e) }
+                      setMatchingMulti(false)
+                    }}
+                    disabled={matchingMulti}
+                    className="w-full rounded-lg border border-dark-border bg-dark-input p-3 text-left transition-all hover:border-accent-green/50 hover:bg-accent-green/5 disabled:opacity-50"
+                  >
+                    <div className="flex items-center justify-between">
+                      <div className="min-w-0">
+                        <p className="truncate text-sm font-medium text-gray-200">{candidate.name}</p>
+                        {candidate.file_name && <p className="truncate text-xs text-gray-500">{candidate.file_name}</p>}
+                      </div>
+                      <div className="shrink-0 text-right ml-3">
+                        <p className="font-mono text-sm font-medium text-gray-200">{fmt(candidate.amount)}</p>
+                        <p className="text-xs text-gray-500">{candidate.date ? new Date(candidate.date).toLocaleDateString('fr-FR') : '-'}</p>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
             </div>
           </div>
         </div>
