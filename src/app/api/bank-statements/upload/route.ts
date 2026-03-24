@@ -3,7 +3,7 @@ import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb, adminStorage } from '@/lib/firebase/admin'
 import { writeAuditLog } from '@/lib/audit'
 import { parseCSV, parseExcel, ParsedTransaction } from '@/lib/bank-parsers'
-import anthropic, { CLASSIFICATION_MODEL, MAX_TOKENS } from '@/lib/anthropic'
+import anthropic, { FAST_MODEL } from '@/lib/anthropic'
 
 export const maxDuration = 25 // Allow up to 25s for PDF parsing with Claude Vision
 
@@ -242,8 +242,8 @@ export async function POST(request: NextRequest) {
         const base64Pdf = uploadBuffer.toString('base64')
 
         const response = await anthropic.messages.create({
-          model: CLASSIFICATION_MODEL,
-          max_tokens: MAX_TOKENS,
+          model: FAST_MODEL,
+          max_tokens: 8192,
           messages: [{
             role: 'user',
             content: [
