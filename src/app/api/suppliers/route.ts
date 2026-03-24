@@ -4,7 +4,6 @@ import { adminDb } from '@/lib/firebase/admin'
 
 export const dynamic = 'force-dynamic'
 
-// GET: list all suppliers
 export async function GET(request: NextRequest) {
   try {
     const decoded = await verifyAuth(request)
@@ -12,8 +11,10 @@ export async function GET(request: NextRequest) {
       return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
     }
 
-    const snap = await adminDb.collection('suppliers').orderBy('last_used_at', 'desc').get()
-    const suppliers = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    const snap = await adminDb.collection('suppliers').get()
+    const suppliers = snap.docs
+      .map((doc) => ({ id: doc.id, ...doc.data() }))
+      .sort((a: any, b: any) => (b.last_used_at || '').localeCompare(a.last_used_at || ''))
 
     return NextResponse.json(suppliers)
   } catch (error) {

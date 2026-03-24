@@ -6,7 +6,7 @@ import { useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge, ConfidenceBadge } from '@/components/ui/Badge'
 import PCGSelector from './PCGSelector'
 import {
-  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package,
+  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package, Landmark, Link, Search,
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import type { Invoice, InvoiceLine, PCGAccount } from '@/types'
@@ -29,6 +29,10 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [annotating, setAnnotating] = useState(false)
   const [deleting, setDeleting] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
+  const [showBankMatch, setShowBankMatch] = useState(false)
+  const [bankTransactions, setBankTransactions] = useState<any[]>([])
+  const [bankSearching, setBankSearching] = useState(false)
+  const [bankMatched, setBankMatched] = useState<string | null>(null)
 
   // Supplier auto-classify
   const [supplierId, setSupplierId] = useState<string | null>(null)
