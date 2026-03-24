@@ -33,6 +33,8 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [bankTransactions, setBankTransactions] = useState<any[]>([])
   const [bankSearching, setBankSearching] = useState(false)
   const [bankMatched, setBankMatched] = useState<string | null>(null)
+  const [selectedBankTxIds, setSelectedBankTxIds] = useState<string[]>([])
+  const [bankMatching, setBankMatching] = useState(false)
 
   // Supplier auto-classify
   const [supplierId, setSupplierId] = useState<string | null>(null)
@@ -627,53 +629,80 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                   )}
                   {filtered.map((tx: any) => {
                     const isMatch = allAmounts.some((a: number) => Math.abs(tx.amount - a) <= 0.01)
+                    const isSelected = selectedBankTxIds.includes(tx.id)
                     return (
-                      <button
+                      <label
                         key={tx.id}
-                        onClick={async () => {
-                          try {
-                            const res = await authFetch(`/api/bank-statements/${tx.statement_id}/match`, {
-                              method: 'POST',
-                              headers: { 'Content-Type': 'application/json' },
-                              body: JSON.stringify({ transaction_id: tx.id, invoice_id: invoiceId }),
-                            })
-                            if (res.ok) {
-                              setBankMatched(tx.id)
-                              setShowBankMatch(false)
-                              setBankTransactions((prev) => prev.filter((t: any) => t.id !== tx.id))
-                            }
-                          } catch (e) {
-                            console.error('Match error:', e)
-                          }
-                        }}
-                        className={`w-full rounded-lg border p-3 text-left transition-all hover:border-accent-green/50 hover:bg-accent-green/5 ${
-                          isMatch ? 'border-accent-green/30 bg-accent-green/5' : 'border-dark-border bg-dark-input'
+                        className={`flex cursor-pointer items-center gap-3 rounded-lg border p-2.5 transition-all hover:border-accent-green/50 ${
+                          isSelected ? 'border-accent-green/50 bg-accent-green/5' : isMatch ? 'border-accent-green/20 bg-accent-green/5' : 'border-dark-border bg-dark-input'
                         }`}
                       >
-                        <div className="flex items-center justify-between">
-                          <div className="min-w-0">
-                            <p className="truncate text-sm text-gray-200">{tx.label}</p>
-                            <p className="text-xs text-gray-500 font-mono">
-                              {tx.date ? new Date(tx.date).toLocaleDateString('fr-FR') : '-'}
-                            </p>
-                          </div>
-                          <div className="shrink-0 ml-3">
-                            <span className={`font-mono text-sm font-medium ${
-                              tx.type === 'debit' ? 'text-accent-red' : 'text-accent-green'
-                            }`}>
-                              {tx.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' \u20AC'}
-                            </span>
-                            {isMatch && (
-                              <span className="ml-2 rounded bg-accent-green/10 px-1.5 py-0.5 text-[10px] font-medium text-accent-green">
-                                MATCH
-                              </span>
-                            )}
-                          </div>
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => {
+                            setSelectedBankTxIds(prev =>
+                              prev.includes(tx.id) ? prev.filter(id => id !== tx.id) : [...prev, tx.id]
+                            )
+                          }}
+                          className="h-4 w-4 rounded border-dark-border bg-dark-input text-accent-green focus:ring-accent-green/50"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm text-gray-200">{tx.label}</p>
+                          <p className="text-xs text-gray-500 font-mono">
+                            {tx.date ? new Date(tx.date).toLocaleDateString('fr-FR') : '-'}
+                          </p>
                         </div>
-                      </button>
+                        <div className="shrink-0 ml-3 text-right">
+                          <span className={`font-mono text-sm font-medium ${
+                            tx.type === 'debit' ? 'text-accent-red' : 'text-accent-green'
+                          }`}>
+                            {tx.amount.toLocaleString('fr-FR', { minimumFractionDigits: 2 }) + ' \u20AC'}
+                          </span>
+                          {isMatch && (
+                            <span className="ml-2 rounded bg-accent-green/10 px-1.5 py-0.5 text-[10px] font-medium text-accent-green">
+                              MATCH
+                            </span>
+                          )}
+                        </div>
+                      </label>
                     )
                   })}
                 </div>
+
+                {selectedBankTxIds.length > 0 && (
+                  <div className="flex items-center justify-between border-t border-dark-border pt-3">
+                    <span className="text-xs text-gray-500">{selectedBankTxIds.length} transaction(s) selectionnee(s)</span>
+                    <button
+                      onClick={async () => {
+                        setBankMatching(true)
+                        try {
+                          for (const txId of selectedBankTxIds) {
+                            const tx = bankTransactions.find((t: any) => t.id === txId)
+                            if (!tx) continue
+                            await authFetch(`/api/bank-statements/${tx.statement_id}/match`, {
+                              method: 'POST',
+                              headers: { 'Content-Type': 'application/json' },
+                              body: JSON.stringify({ transaction_id: txId, invoice_id: invoiceId }),
+                            })
+                          }
+                          setBankMatched('multi')
+                          setShowBankMatch(false)
+                          setSelectedBankTxIds([])
+                          setBankTransactions(prev => prev.filter((t: any) => !selectedBankTxIds.includes(t.id)))
+                        } catch (e) {
+                          console.error('Match error:', e)
+                        }
+                        setBankMatching(false)
+                      }}
+                      disabled={bankMatching}
+                      className="flex items-center gap-1.5 rounded-lg bg-accent-green px-4 py-2 text-sm font-semibold text-dark-bg hover:bg-accent-green/90 disabled:opacity-50"
+                    >
+                      {bankMatching ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                      Confirmer le rapprochement
+                    </button>
+                  </div>
+                )}
               </>
             )
           })()}
