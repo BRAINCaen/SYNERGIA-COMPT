@@ -83,6 +83,8 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [previewCandidate, setPreviewCandidate] = useState<MatchCandidate | null>(null)
   const [previewUrl, setPreviewUrl] = useState<string | null>(null)
   const [loadingPreview, setLoadingPreview] = useState(false)
+  const [selectedCandidateIds, setSelectedCandidateIds] = useState<string[]>([])
+  const [matchingMulti, setMatchingMulti] = useState(false)
 
   // Close ignore dropdown on outside click
   useEffect(() => {
@@ -307,6 +309,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     setSearchQuery('')
     setSearching(true)
     setSearchResults([])
+    setSelectedCandidateIds([])
 
     // Auto-load ALL invoices sorted by closest amount
     try {
@@ -729,55 +732,142 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                 )}
               </div>
 
-              {/* Results */}
-              <div className="max-h-64 space-y-2 overflow-y-auto">
+              {/* Results with checkboxes + eye preview */}
+              <div className="max-h-64 space-y-1.5 overflow-y-auto">
                 {searchResults.length > 0 ? (
-                  searchResults.map((candidate) => (
-                    <button
-                      key={`${candidate.type}-${candidate.id}`}
-                      onClick={() => confirmMatch(candidate)}
-                      className="w-full rounded-lg border border-dark-border bg-dark-input p-3 text-left transition-all hover:border-accent-green/50 hover:bg-accent-green/5"
-                    >
-                      <div className="flex items-center justify-between">
-                        <div className="flex items-center gap-2 min-w-0">
+                  searchResults.map((candidate) => {
+                    const isSelected = selectedCandidateIds.includes(candidate.id)
+                    const txAmount = matchModalTx?.debit || matchModalTx?.credit || 0
+                    const isExactMatch = Math.abs(candidate.amount - txAmount) <= 0.01
+                    return (
+                      <div
+                        key={`${candidate.type}-${candidate.id}`}
+                        className={`flex items-center gap-2 rounded-lg border p-2.5 transition-all ${
+                          isSelected ? 'border-accent-green/50 bg-accent-green/5' : isExactMatch ? 'border-accent-green/20 bg-accent-green/5' : 'border-dark-border bg-dark-input'
+                        }`}
+                      >
+                        <input
+                          type="checkbox"
+                          checked={isSelected}
+                          onChange={() => setSelectedCandidateIds(prev =>
+                            prev.includes(candidate.id) ? prev.filter(id => id !== candidate.id) : [...prev, candidate.id]
+                          )}
+                          className="h-4 w-4 shrink-0 rounded border-dark-border bg-dark-input text-accent-green focus:ring-accent-green/50 cursor-pointer"
+                        />
+                        <div className="flex items-center gap-2 min-w-0 flex-1">
                           {candidate.type === 'invoice' ? (
                             <ArrowDownRight className="h-4 w-4 shrink-0 text-accent-red" />
                           ) : (
                             <ArrowUpRight className="h-4 w-4 shrink-0 text-accent-green" />
                           )}
                           <div className="min-w-0">
-                            <p className="truncate text-sm font-medium text-gray-200">
-                              {candidate.name}
-                            </p>
+                            <p className="truncate text-sm font-medium text-gray-200">{candidate.name}</p>
                             {candidate.file_name && candidate.file_name !== candidate.name && (
                               <p className="truncate text-xs text-gray-500">{candidate.file_name}</p>
                             )}
-                            {candidate.supplier && !candidate.file_name && (
-                              <p className="text-xs text-gray-500">{candidate.supplier}</p>
-                            )}
                           </div>
                         </div>
-                        <div className="shrink-0 text-right ml-3">
-                          <p className="font-mono text-sm font-medium text-gray-200">
-                            {fmt(candidate.amount)}
-                          </p>
-                          <p className="text-xs text-gray-500">
-                            {candidate.date
-                              ? new Date(candidate.date).toLocaleDateString('fr-FR')
-                              : '-'}
-                          </p>
+                        <div className="shrink-0 text-right flex items-center gap-2">
+                          <div>
+                            <p className="font-mono text-sm font-medium text-gray-200">{fmt(candidate.amount)}</p>
+                            <p className="text-xs text-gray-500">
+                              {candidate.date ? new Date(candidate.date).toLocaleDateString('fr-FR') : '-'}
+                            </p>
+                          </div>
+                          {isExactMatch && (
+                            <span className="rounded bg-accent-green/10 px-1 py-0.5 text-[9px] font-bold text-accent-green">MATCH</span>
+                          )}
+                          <button
+                            onClick={(e) => { e.stopPropagation(); handlePreview(candidate) }}
+                            className="rounded p-1 text-gray-500 hover:bg-dark-hover hover:text-gray-200"
+                            title="Voir la facture"
+                          >
+                            <Eye className="h-4 w-4" />
+                          </button>
                         </div>
                       </div>
-                    </button>
-                  ))
-                ) : searchQuery.length >= 2 && !searching ? (
+                    )
+                  })
+                ) : !searching ? (
                   <p className="py-6 text-center text-sm text-gray-500">Aucun resultat.</p>
-                ) : (
-                  <p className="py-6 text-center text-sm text-gray-500">
-                    Tapez au moins 2 caracteres pour rechercher.
-                  </p>
-                )}
+                ) : null}
               </div>
+
+              {/* Confirm button */}
+              {selectedCandidateIds.length > 0 && (
+                <div className="flex items-center justify-between border-t border-dark-border pt-3">
+                  <span className="text-xs text-gray-500">{selectedCandidateIds.length} facture(s) selectionnee(s)</span>
+                  <button
+                    onClick={async () => {
+                      if (!matchModalTx) return
+                      setMatchingMulti(true)
+                      try {
+                        for (const cId of selectedCandidateIds) {
+                          const c = searchResults.find(r => r.id === cId)
+                          if (!c) continue
+                          const body: Record<string, string> = { transaction_id: matchModalTx.id }
+                          if (c.type === 'invoice') body.invoice_id = c.id
+                          else body.revenue_id = c.id
+                          await authFetch(`/api/bank-statements/${statementId}/match`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify(body),
+                          })
+                        }
+                        setMatchModalTx(null)
+                        setSelectedCandidateIds([])
+                        await fetchData()
+                      } catch (e) { console.error('Match error:', e) }
+                      setMatchingMulti(false)
+                    }}
+                    disabled={matchingMulti}
+                    className="flex items-center gap-1.5 rounded-lg bg-accent-green px-4 py-2 text-sm font-semibold text-dark-bg hover:bg-accent-green/90 disabled:opacity-50"
+                  >
+                    {matchingMulti ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                    Confirmer
+                  </button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PDF Preview modal */}
+      {previewCandidate && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/70 backdrop-blur-sm">
+          <div className="mx-4 w-full max-w-3xl rounded-xl border border-dark-border bg-dark-card shadow-2xl" style={{ maxHeight: '85vh' }}>
+            <div className="flex items-center justify-between border-b border-dark-border px-6 py-3">
+              <div>
+                <p className="text-sm font-medium text-white">{previewCandidate.name}</p>
+                <p className="text-xs text-gray-500">{previewCandidate.file_name} — {fmt(previewCandidate.amount)}</p>
+              </div>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={confirmPreviewMatch}
+                  className="flex items-center gap-1.5 rounded-lg bg-accent-green px-3 py-1.5 text-xs font-semibold text-dark-bg hover:bg-accent-green/90"
+                >
+                  <Check className="h-3.5 w-3.5" />
+                  Valider le rapprochement
+                </button>
+                <button
+                  onClick={() => { setPreviewCandidate(null); setPreviewUrl(null) }}
+                  className="rounded-lg p-1.5 text-gray-400 hover:bg-dark-hover hover:text-gray-200"
+                >
+                  <X className="h-5 w-5" />
+                </button>
+              </div>
+            </div>
+            <div className="p-4" style={{ height: '70vh' }}>
+              {loadingPreview ? (
+                <div className="flex h-full items-center justify-center">
+                  <Loader2 className="h-8 w-8 animate-spin text-accent-green" />
+                </div>
+              ) : previewUrl ? (
+                <iframe src={previewUrl} className="h-full w-full rounded-lg border border-dark-border" />
+              ) : (
+                <p className="flex h-full items-center justify-center text-gray-500">Impossible de charger le PDF</p>
+              )}
             </div>
           </div>
         </div>
