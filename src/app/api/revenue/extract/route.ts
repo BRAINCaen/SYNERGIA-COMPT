@@ -57,12 +57,25 @@ Règles :
       { type: 'text', text: prompt },
     ]
 
+    // Call Claude with retry on 429
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const response = await (anthropic.messages.create as any)({
-      model: CLASSIFICATION_MODEL,
-      max_tokens: MAX_TOKENS,
-      messages: [{ role: 'user', content }],
-    })
+    let response: any
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await (anthropic.messages.create as any)({
+          model: CLASSIFICATION_MODEL,
+          max_tokens: MAX_TOKENS,
+          messages: [{ role: 'user', content }],
+        })
+        break
+      } catch (e: any) {
+        if (e?.status === 429 && attempt < 2) {
+          await new Promise(r => setTimeout(r, 10000 * (attempt + 1)))
+          continue
+        }
+        throw e
+      }
+    }
 
     const textBlock = response.content.find((b: { type: string }) => b.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {

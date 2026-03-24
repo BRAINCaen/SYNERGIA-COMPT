@@ -272,7 +272,7 @@ export default function RevenueClient() {
     const processSequentially = async () => {
       for (let i = 0; i < arr.length; i++) {
         await processFile(arr[i], startIdx + i)
-        if (i < arr.length - 1) await new Promise(r => setTimeout(r, 2000))
+        if (i < arr.length - 1) await new Promise(r => setTimeout(r, 5000))
       }
     }
     processSequentially()

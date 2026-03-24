@@ -395,7 +395,7 @@ export default function InvoiceUploader() {
     let count = 0
     for (let i = 0; i < files.length; i++) {
       if (files[i].status === 'pending') {
-        if (count > 0) await new Promise(r => setTimeout(r, 2000))
+        if (count > 0) await new Promise(r => setTimeout(r, 5000))
         await processFile(i)
         count++
       }
