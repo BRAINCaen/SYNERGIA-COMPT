@@ -211,27 +211,32 @@ export interface BankTransaction {
   created_at: string
 }
 
-// ── Revenue / Recettes ───────────────────────────
+// ── Revenue / Encaissements & Subventions ────────
 
-export type RevenueSource = 'tpe_virtuel' | 'virement' | 'tpe_sur_place' | 'cheque' | 'ancv' | 'especes'
+export type RevenueSource = 'tpe_virtuel' | 'virement' | 'tpe_sur_place' | 'cheque' | 'ancv' | 'especes' | 'billetterie' | 'prestation' | 'subvention'
+export type RevenueDocumentType = 'encaissement' | 'subvention'
 export type RevenueStatus = 'draft' | 'validated' | 'exported'
 
 export interface RevenueEntry {
   id: string
   user_id: string
   date: string
+  document_type: RevenueDocumentType
   source: RevenueSource
+  entity_name: string | null
   description: string
+  reference: string | null
   amount_ht: number
   tva_rate: number
   tva_amount: number
   amount_ttc: number
+  items: { description: string; amount: number }[]
   pcg_code: string
   pcg_label: string
   journal_code: string
-  supporting_doc_path: string | null
-  supporting_doc_name: string | null
-  bank_transaction_id: string | null
+  file_path: string | null
+  file_name: string | null
+  matched_transaction_ids: string[]
   status: RevenueStatus
   created_at: string
   updated_at: string

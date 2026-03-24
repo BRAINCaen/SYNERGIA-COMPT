@@ -21,7 +21,7 @@ const navigation = [
   { name: 'Factures', href: '/invoices', icon: FileText },
   { name: 'Upload', href: '/invoices/upload', icon: Upload },
   { name: 'Releves bancaires', href: '/bank', icon: Landmark },
-  { name: 'Recettes', href: '/revenue', icon: Coins },
+  { name: 'Encaissements', href: '/revenue', icon: Coins },
   { name: 'Personnel', href: '/personnel', icon: Users },
   { name: 'Export', href: '/export', icon: Download },
 ]

@@ -9,13 +9,16 @@ const VALID_SOURCES = [
   'cheque',
   'ancv',
   'especes',
+  'billetterie',
+  'prestation',
+  'subvention',
 ]
 
 export async function GET(request: NextRequest) {
   try {
     const decoded = await verifyAuth(request)
     if (!decoded) {
-      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
+      return NextResponse.json({ error: 'Non autorise' }, { status: 401 })
     }
 
     const { searchParams } = new URL(request.url)
@@ -27,6 +30,7 @@ export async function GET(request: NextRequest) {
       .where('user_id', '==', decoded.uid)
       .get()
 
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     let entries = snapshot.docs
       .map((doc) => ({ id: doc.id, ...doc.data() }))
       .sort((a: any, b: any) => (b.date || '').localeCompare(a.date || ''))
@@ -34,10 +38,11 @@ export async function GET(request: NextRequest) {
     if (source) {
       if (!VALID_SOURCES.includes(source)) {
         return NextResponse.json(
-          { error: `Source invalide. Sources acceptées : ${VALID_SOURCES.join(', ')}` },
+          { error: `Source invalide. Sources acceptees : ${VALID_SOURCES.join(', ')}` },
           { status: 400 }
         )
       }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       entries = entries.filter((e: any) => e.source === source)
     }
 
@@ -67,7 +72,7 @@ export async function POST(request: NextRequest) {
   try {
     const decoded = await verifyAuth(request)
     if (!decoded) {
-      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
+      return NextResponse.json({ error: 'Non autorise' }, { status: 401 })
     }
 
     const contentType = request.headers.get('content-type') || ''
@@ -80,11 +85,15 @@ export async function POST(request: NextRequest) {
 
       body = {
         date: formData.get('date') as string,
+        document_type: formData.get('document_type') as string || 'encaissement',
         source: formData.get('source') as string,
+        entity_name: formData.get('entity_name') as string || null,
         description: formData.get('description') as string,
+        reference: formData.get('reference') as string || null,
         amount_ht: parseFloat(formData.get('amount_ht') as string),
         tva_rate: parseFloat(formData.get('tva_rate') as string),
         amount_ttc: parseFloat(formData.get('amount_ttc') as string),
+        items: formData.get('items') ? JSON.parse(formData.get('items') as string) : [],
         pcg_code: formData.get('pcg_code') as string,
         pcg_label: formData.get('pcg_label') as string,
         journal_code: formData.get('journal_code') as string,
@@ -103,7 +112,7 @@ export async function POST(request: NextRequest) {
 
     if (!VALID_SOURCES.includes(body.source as string)) {
       return NextResponse.json(
-        { error: `Source invalide. Sources acceptées : ${VALID_SOURCES.join(', ')}` },
+        { error: `Source invalide. Sources acceptees : ${VALID_SOURCES.join(', ')}` },
         { status: 400 }
       )
     }
@@ -120,7 +129,7 @@ export async function POST(request: NextRequest) {
     if (file) {
       if (file.type !== 'application/pdf') {
         return NextResponse.json(
-          { error: 'Seuls les fichiers PDF sont acceptés' },
+          { error: 'Seuls les fichiers PDF sont acceptes' },
           { status: 400 }
         )
       }
@@ -141,18 +150,23 @@ export async function POST(request: NextRequest) {
       id: docRef.id,
       user_id: decoded.uid,
       date: body.date,
+      document_type: body.document_type || 'encaissement',
       source: body.source,
+      entity_name: body.entity_name || null,
       description: body.description || null,
+      reference: body.reference || null,
       amount_ht: amountHt,
       tva_rate: tvaRate,
       tva_amount: tvaAmount,
       amount_ttc: amountTtc,
+      items: Array.isArray(body.items) ? body.items : [],
       pcg_code: body.pcg_code || null,
       pcg_label: body.pcg_label || null,
       journal_code: (body.journal_code as string) || 'VE',
       status: 'draft',
       file_path: filePath,
       file_name: fileName,
+      matched_transaction_ids: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString(),
     }
