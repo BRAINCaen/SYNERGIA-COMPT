@@ -1,10 +1,16 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import anthropic, { FAST_MODEL } from '@/lib/anthropic'
-// @ts-expect-error pdf-parse/lib/pdf-parse.js skips the test file import that breaks in serverless
-import pdfParse from 'pdf-parse/lib/pdf-parse.js'
 
 export const dynamic = 'force-dynamic'
+
+// Dynamic require to bypass webpack bundling issues with pdf-parse
+async function extractPdfText(buffer: Buffer): Promise<string> {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const pdfParse = require('pdf-parse')
+  const data = await pdfParse(buffer)
+  return data.text || ''
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -22,8 +28,13 @@ export async function POST(request: NextRequest) {
     const buffer = Buffer.from(await file.arrayBuffer())
 
     // Step 1: Extract text from PDF (fast, no AI needed)
-    const pdfData = await pdfParse(buffer)
-    const text = pdfData.text
+    let text: string
+    try {
+      text = await extractPdfText(buffer)
+    } catch (e) {
+      console.error('PDF text extraction failed:', e)
+      return NextResponse.json({ error: 'Impossible de lire le PDF' }, { status: 400 })
+    }
 
     if (!text || text.trim().length < 50) {
       return NextResponse.json({ error: 'PDF illisible ou vide' }, { status: 400 })
