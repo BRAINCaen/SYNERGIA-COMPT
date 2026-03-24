@@ -923,13 +923,40 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                 <input
                   type="text"
                   value={searchQuery}
-                  onChange={(e) => handleSearch(e.target.value)}
+                  onChange={async (e) => {
+                    const q = e.target.value
+                    setSearchQuery(q)
+                    setSearching(true)
+                    try {
+                      const totalAmt = selectedTxIds.reduce((s, id) => { const tx = transactions.find(t => t.id === id); return s + (tx?.debit || tx?.credit || 0) }, 0)
+                      const params = new URLSearchParams({ amount: String(totalAmt) })
+                      if (q.length >= 1) params.set('q', q)
+                      const res = await authFetch(`/api/invoices/search?${params}`)
+                      if (res.ok) {
+                        const data = await res.json()
+                        setSearchResults((data.invoices || []).map((inv: any) => ({
+                          id: inv.id, type: inv.document_type === 'revenue' ? 'revenue' : 'invoice',
+                          name: inv.supplier_name || inv.file_name || 'Sans nom',
+                          amount: inv.total_ttc || 0, date: inv.invoice_date || '', file_name: inv.file_name || '',
+                        })))
+                      }
+                    } catch {}
+                    setSearching(false)
+                  }}
                   placeholder="Rechercher une facture..."
                   className="input-field w-full pl-10 text-sm"
                   autoFocus
                 />
               </div>
               <div className="max-h-64 space-y-1.5 overflow-y-auto">
+                {searching && (
+                  <div className="flex h-16 items-center justify-center">
+                    <Loader2 className="h-5 w-5 animate-spin text-accent-green" />
+                  </div>
+                )}
+                {!searching && searchResults.length === 0 && (
+                  <p className="py-6 text-center text-sm text-gray-500">Aucune facture trouvee. Tapez pour rechercher.</p>
+                )}
                 {searchResults.map((candidate) => (
                   <button
                     key={candidate.id}
