@@ -84,11 +84,34 @@ export default function ReconciliationClient({ statementId }: { statementId: str
 
   const fetchData = async () => {
     try {
-      const res = await authFetch(`/api/bank-statements/${statementId}`)
-      if (res.ok) {
-        const data = await res.json()
-        setStatement(data.statement)
-        setTransactions(data.transactions || [])
+      const [stmtRes, txRes] = await Promise.all([
+        authFetch(`/api/bank-statements/${statementId}`),
+        authFetch(`/api/bank-statements/${statementId}/transactions`),
+      ])
+      if (stmtRes.ok) {
+        const data = await stmtRes.json()
+        // The API returns the statement fields at top level (not nested under .statement)
+        setStatement({
+          id: data.id,
+          file_name: data.file_name,
+          period_month: data.period_month,
+          total_debits: data.total_debits,
+          total_credits: data.total_credits,
+          transaction_count: data.transaction_count || data.summary?.total_transactions || 0,
+        })
+      }
+      if (txRes.ok) {
+        const txData = await txRes.json()
+        const txList = (txData.transactions || []).map((t: any) => ({
+          id: t.id,
+          date: t.date,
+          label: t.label,
+          debit: t.type === 'debit' ? t.amount : null,
+          credit: t.type === 'credit' ? t.amount : null,
+          status: t.match_status || 'unmatched',
+          matched_entity: t.matched_invoice_id ? { id: t.matched_invoice_id, type: 'invoice', name: '', amount: t.amount, date: t.date } : null,
+        }))
+        setTransactions(txList)
       }
     } catch (e) {
       console.error('Fetch error:', e)

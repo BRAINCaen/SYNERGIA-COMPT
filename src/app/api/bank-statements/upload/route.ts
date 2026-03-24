@@ -3,6 +3,7 @@ import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb, adminStorage } from '@/lib/firebase/admin'
 import { writeAuditLog } from '@/lib/audit'
 import { parseCSV, parseExcel, ParsedTransaction } from '@/lib/bank-parsers'
+import anthropic, { CLASSIFICATION_MODEL, MAX_TOKENS } from '@/lib/anthropic'
 
 const ALLOWED_EXTENSIONS = ['csv', 'xlsx', 'xls', 'pdf']
 const ALLOWED_TYPES = [
@@ -233,7 +234,123 @@ export async function POST(request: NextRequest) {
       }
     }
 
-    // PDF: return as pending
+    // PDF: use Claude Vision to extract transactions
+    if (format === 'pdf') {
+      try {
+        const base64Pdf = uploadBuffer.toString('base64')
+
+        const response = await anthropic.messages.create({
+          model: CLASSIFICATION_MODEL,
+          max_tokens: MAX_TOKENS,
+          messages: [{
+            role: 'user',
+            content: [
+              {
+                type: 'document',
+                source: { type: 'base64', media_type: 'application/pdf', data: base64Pdf },
+              },
+              {
+                type: 'text',
+                text: `Extrais TOUTES les transactions bancaires de ce relevé de compte.
+
+Pour chaque opération/mouvement, extrais :
+- date : date de l'opération au format YYYY-MM-DD
+- value_date : date de valeur au format YYYY-MM-DD (si disponible, sinon identique à date)
+- label : libellé complet de l'opération
+- reference : numéro de référence (si disponible, sinon null)
+- debit : montant débit en nombre (si c'est un débit, sinon null)
+- credit : montant crédit en nombre (si c'est un crédit, sinon null)
+
+IMPORTANT :
+- Convertis les dates françaises (JJ/MM/AAAA) en YYYY-MM-DD
+- Les montants doivent être des nombres (pas de symbole €)
+- Inclus TOUTES les lignes, même les frais bancaires, commissions, agios
+- N'inclus PAS les soldes (ancien/nouveau solde)
+- Si tu vois "débit" ou un montant négatif → c'est un debit
+- Si tu vois "crédit" ou un montant positif entrant → c'est un credit
+
+Réponds UNIQUEMENT avec un tableau JSON :
+[{"date":"2026-01-15","value_date":"2026-01-15","label":"PRLV SEPA EDF","reference":"REF123","debit":85.50,"credit":null}]`
+              }
+            ],
+          }],
+        })
+
+        const textBlock = response.content.find(b => b.type === 'text')
+        if (textBlock && textBlock.type === 'text') {
+          let jsonText = textBlock.text.trim()
+          if (jsonText.startsWith('```')) {
+            jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+          }
+
+          const pdfParsed: ParsedTransaction[] = JSON.parse(jsonText)
+
+          if (pdfParsed.length > 0) {
+            const { totalDebits, totalCredits } = await writeTransactions(
+              statementRef.id, decoded.uid, pdfParsed
+            )
+            const periodMonth = computePeriodMonth(pdfParsed)
+
+            await statementRef.update({
+              status: 'parsed',
+              transaction_count: pdfParsed.length,
+              total_debits: Math.round(totalDebits * 100) / 100,
+              total_credits: Math.round(totalCredits * 100) / 100,
+              period_month: periodMonth,
+              updated_at: new Date().toISOString(),
+            })
+
+            await writeAuditLog({
+              action: 'bank_statement_upload',
+              invoice_id: statementRef.id,
+              user_id: decoded.uid,
+              after: {
+                file_name: file.name, format: 'pdf',
+                transaction_count: pdfParsed.length,
+                total_debits: Math.round(totalDebits * 100) / 100,
+                total_credits: Math.round(totalCredits * 100) / 100,
+              },
+            })
+
+            const updatedDoc = await statementRef.get()
+            return NextResponse.json({
+              success: true,
+              statement: { id: updatedDoc.id, ...updatedDoc.data() },
+              transaction_count: pdfParsed.length,
+            })
+          }
+        }
+
+        // If no transactions found
+        await statementRef.update({
+          status: 'error',
+          error_message: 'Aucune transaction trouvée dans le PDF',
+          updated_at: new Date().toISOString(),
+        })
+
+        const updatedDoc = await statementRef.get()
+        return NextResponse.json({
+          success: true,
+          statement: { id: updatedDoc.id, ...updatedDoc.data() },
+          transaction_count: 0,
+        })
+      } catch (pdfError) {
+        console.error('PDF parse error:', pdfError)
+        await statementRef.update({
+          status: 'error',
+          error_message: pdfError instanceof Error ? pdfError.message : 'Erreur de parsing PDF',
+          updated_at: new Date().toISOString(),
+        })
+        const updatedDoc = await statementRef.get()
+        return NextResponse.json({
+          success: true,
+          statement: { id: updatedDoc.id, ...updatedDoc.data() },
+          transaction_count: 0,
+        })
+      }
+    }
+
+    // Fallback: return as pending
     await writeAuditLog({
       action: 'bank_statement_upload',
       invoice_id: statementRef.id,
