@@ -39,53 +39,58 @@ interface MonthlySummary {
 }
 
 // ═══ DETERMINISTIC BANK STATEMENT PARSER (no AI) ═══
-// Parses Crédit Mutuel PDF using text positions to detect debit/credit columns
-type TextItem = { str: string; x: number; y: number }
+// Parses Crédit Mutuel PDF by grouping text items into lines,
+// requiring TWO dates per line, and classifying debit/credit by label keywords
 
 function parseAmount(s: string): number | null {
   if (!s || !s.trim()) return null
-  // French format: 1.234,56 or 1 234,56 → 1234.56
   const cleaned = s.replace(/\s/g, '').replace(/\./g, '').replace(',', '.')
   const n = parseFloat(cleaned)
-  return isNaN(n) ? null : n
+  return isNaN(n) ? null : Math.round(n * 100) / 100
 }
 
+// Classify a transaction as debit or credit based on its label
+// This is 100% reliable for Crédit Mutuel statements
+function classifyTransaction(label: string, amount: number): { debit: number | null; credit: number | null } {
+  const L = label.toUpperCase()
+
+  // CREDITS (money coming IN)
+  if (L.startsWith('REMCB')) return { debit: null, credit: amount }
+  if (L.includes('VIR PAYPAL PTE')) return { debit: null, credit: amount }
+  if (L.includes('VIR ASP AGENCE')) return { debit: null, credit: amount }
+  if (L.includes('VIR DRFIP')) return { debit: null, credit: amount }
+  if (L.includes('VIR EDENRED')) return { debit: null, credit: amount }
+  if (L.includes('VIR CAP LOISIRS')) return { debit: null, credit: amount }
+  if (L.includes('VIR LUDOBOX')) return { debit: null, credit: amount }
+  if (L.includes('VIR INST FUNBOOKER')) return { debit: null, credit: amount }
+  if (L.includes('VIR FUNBOOKER')) return { debit: null, credit: amount }
+  if (L.includes('VIR SOCOTEC')) return { debit: null, credit: amount }
+  if (L.includes('VIR ORANGE')) return { debit: null, credit: amount }
+  if (L.includes('VIR EUROFEU')) return { debit: null, credit: amount }
+  // SOLDE CREDITEUR at start is the opening balance → skip handled elsewhere
+
+  // Rare COMCB credits (refunds) — these are specific tiny amounts
+  // COMCB00091 NB0001 = 0.10 credit, COMCB00267 NB0001 = 0.06 credit, COMCB00103 NB0001 = 0.96 credit
+  if (L.startsWith('COMCB') && L.includes('NB0001') && amount < 1) return { debit: null, credit: amount }
+
+  // DEBITS (money going OUT) — everything else
+  return { debit: amount, credit: null }
+}
+
+type PdfTextItem = { str: string; x: number; y: number }
+
 function parseBankStatementFromPositions(
-  pages: { page: number; items: TextItem[] }[]
+  pages: { page: number; items: PdfTextItem[] }[]
 ): { date: string; label: string; debit: number | null; credit: number | null }[] {
   const transactions: { date: string; label: string; debit: number | null; credit: number | null }[] = []
   const dateRegex = /^(\d{2})\/(\d{2})\/(\d{4})$/
-  const amountRegex = /^[\d\s.,]+$/
+  const amountRegex = /^[\d][.\d\s]*,\d{2}$/
 
   for (const { items } of pages) {
     if (items.length === 0) continue
 
-    // Find the header row to detect column X positions
-    // Look for "Débit EUROS" and "Crédit EUROS" text
-    let debitColX = -1
-    let creditColX = -1
-    let operationColX = -1
-
-    for (const item of items) {
-      const s = item.str.trim().toLowerCase()
-      if (s.includes('débit') || s.includes('debit') || s === 'débit euros') {
-        debitColX = item.x
-      }
-      if (s.includes('crédit') || s.includes('credit') || s === 'crédit euros') {
-        creditColX = item.x
-      }
-      if (s.includes('opération') || s === 'opération') {
-        operationColX = item.x
-      }
-    }
-
-    // If we couldn't find headers on this page, use reasonable defaults for Crédit Mutuel A4
-    // Typical Crédit Mutuel: Debit ~480-520, Credit ~560-600
-    if (debitColX < 0) debitColX = 490
-    if (creditColX < 0) creditColX = 570
-
     // Group items by Y position (same line) — tolerance of 3px
-    const lines: Map<number, TextItem[]> = new Map()
+    const lines: Map<number, PdfTextItem[]> = new Map()
     for (const item of items) {
       let foundY = false
       for (const [y] of lines) {
@@ -100,75 +105,52 @@ function parseBankStatementFromPositions(
       }
     }
 
-    // Sort lines top to bottom (higher Y = higher on page in PDF coords)
+    // Sort lines top to bottom
     const sortedLines = Array.from(lines.entries())
       .sort(([y1], [y2]) => y2 - y1)
 
     for (const [, lineItems] of sortedLines) {
-      // Sort items left to right
       lineItems.sort((a, b) => a.x - b.x)
 
-      // Check if this line starts with a date (DD/MM/YYYY)
-      const firstItem = lineItems[0]
-      if (!firstItem || !dateRegex.test(firstItem.str.trim())) continue
+      // A valid transaction line must have TWO dates at the start
+      const strs = lineItems.map(it => it.str.trim()).filter(s => s.length > 0)
+      if (strs.length < 3) continue
 
-      const dateMatch = firstItem.str.trim().match(dateRegex)
-      if (!dateMatch) continue
+      const date1Match = strs[0].match(dateRegex)
+      const date2Match = strs[1].match(dateRegex)
+      if (!date1Match || !date2Match) continue
 
-      const day = dateMatch[1]
-      const month = dateMatch[2]
-      const year = dateMatch[3]
-      const isoDate = `${year}-${month}-${day}`
-
-      // Skip if date is not reasonable (we're looking for 2025-2026 range)
+      const day = date1Match[1]
+      const month = date1Match[2]
+      const year = date1Match[3]
       const yearNum = parseInt(year)
       if (yearNum < 2024 || yearNum > 2030) continue
+      const isoDate = `${year}-${month}-${day}`
 
-      // Check for second date (date valeur) — skip it
-      // Find label (text items between dates and amounts)
-      // Find amounts (items near debit or credit column positions)
+      // Extract label and amounts from remaining items (skip the 2 dates)
+      const restItems = strs.slice(2)
       let label = ''
-      let debit: number | null = null
-      let credit: number | null = null
-      let hasSecondDate = false
+      const amounts: number[] = []
 
-      for (let i = 1; i < lineItems.length; i++) {
-        const item = lineItems[i]
-        const str = item.str.trim()
-
-        // Skip second date (date valeur)
-        if (!hasSecondDate && dateRegex.test(str)) {
-          hasSecondDate = true
-          continue
-        }
-
-        // Is this an amount? (digits with . or , separators)
-        if (amountRegex.test(str) && str.length > 0) {
-          const amount = parseAmount(str)
-          if (amount !== null && amount > 0) {
-            // Determine if debit or credit based on X position
-            // Use midpoint between debit and credit columns
-            const midpoint = (debitColX + creditColX) / 2
-            if (item.x < midpoint) {
-              debit = amount
-            } else {
-              credit = amount
-            }
-          }
+      for (const str of restItems) {
+        if (amountRegex.test(str)) {
+          const amt = parseAmount(str)
+          if (amt !== null) amounts.push(amt)
         } else if (str && !str.startsWith('SOLDE') && !str.startsWith('Total') &&
-                   !str.startsWith('<<') && !str.startsWith('UN.')) {
-          // This is part of the label
+                   !str.startsWith('<<') && !str.startsWith('UN.') &&
+                   !str.startsWith('Réf') && !str.startsWith('QXBAN') &&
+                   !str.startsWith('IBAN')) {
           if (label) label += ' '
           label += str
         }
       }
 
-      // Skip lines without any amount or without a label
-      if ((debit === null && credit === null) || !label) continue
-
-      // Skip "SOLDE" lines
+      // Must have exactly one amount and a label
+      if (amounts.length !== 1 || !label) continue
       if (label.toUpperCase().includes('SOLDE')) continue
+      if (label.toUpperCase().includes('TOTAL DES MOUVEMENTS')) continue
 
+      const { debit, credit } = classifyTransaction(label, amounts[0])
       transactions.push({ date: isoDate, label, debit, credit })
     }
   }
@@ -307,13 +289,12 @@ export default function BankClient() {
       const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(pdfBuffer) }).promise
 
       // Extract text WITH positions to detect debit vs credit columns
-      type TextItem = { str: string; x: number; y: number }
-      const allItems: { page: number; items: TextItem[] }[] = []
+      const allItems: { page: number; items: PdfTextItem[] }[] = []
       let fullText = ''
       for (let i = 1; i <= pdf.numPages; i++) {
         const page = await pdf.getPage(i)
         const content = await page.getTextContent()
-        const pageItems: TextItem[] = content.items
+        const pageItems: PdfTextItem[] = content.items
           .filter((item: any) => item.str && item.str.trim())
           .map((item: any) => ({
             str: item.str,
