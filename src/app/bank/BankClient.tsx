@@ -300,10 +300,39 @@ export default function BankClient() {
         throw new Error('PDF illisible — aucun texte extractible')
       }
 
-      // Step 4: Parse transactions using column positions (DETERMINISTIC, no AI)
-      // Crédit Mutuel PDF has columns: Date | Date valeur | Opération | Débit EUROS | Crédit EUROS
-      // We detect column positions from the header row, then classify amounts
-      const transactions = parseBankStatementFromPositions(allItems)
+      // Step 4: Send EACH PAGE separately to AI (small text = fast response = no timeout)
+      // Each page has ~5-15 transactions max
+      const pageTexts: string[] = []
+      for (let i = 1; i <= pdf.numPages; i++) {
+        const page = await pdf.getPage(i)
+        const content = await page.getTextContent()
+        const text = content.items.map((item: any) => item.str).join(' ')
+        if (text.length > 50) pageTexts.push(text)
+      }
+
+      let allTransactions: any[] = []
+      for (let p = 0; p < pageTexts.length; p++) {
+        setAnalyzing(`page ${p + 1}/${pageTexts.length}`)
+        try {
+          const parseRes = await authFetch('/api/bank-statements/parse-text', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ text: pageTexts[p] }),
+          })
+          if (parseRes.ok) {
+            const data = await parseRes.json()
+            if (data.transactions?.length > 0) {
+              allTransactions = allTransactions.concat(data.transactions)
+            }
+          }
+        } catch {
+          // Skip failed pages, continue with others
+        }
+      }
+      setAnalyzing(id)
+
+      // No deduplication needed — each page is processed separately, no overlap
+      const transactions = allTransactions
 
       if (transactions.length === 0) {
         throw new Error('Aucune transaction trouvée dans le relevé')

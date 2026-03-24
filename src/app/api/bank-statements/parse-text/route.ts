@@ -16,53 +16,47 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Texte trop court' }, { status: 400 })
     }
 
-    const chunk = text.substring(0, 14000)
+    // Only send the first 5000 chars (one page is typically 1000-3000 chars)
+    const pageText = text.substring(0, 5000)
 
     const response = await anthropic.messages.create({
       model: FAST_MODEL,
-      max_tokens: 8192,
+      max_tokens: 4096,
       messages: [{
         role: 'user',
-        content: `Tu extrais les transactions d'un relevé bancaire Crédit Mutuel (format français).
+        content: `Extrais les transactions de CETTE PAGE d'un relevé bancaire Crédit Mutuel.
 
-RÈGLES CRITIQUES pour débit/crédit :
-- La colonne "Débit EUROS" = argent qui SORT du compte (débit > 0, credit = null)
-- La colonne "Crédit EUROS" = argent qui ENTRE dans le compte (debit = null, credit > 0)
+FORMAT DU RELEVÉ : chaque transaction a une date, une date valeur, un libellé, et un montant dans la colonne "Débit EUROS" OU "Crédit EUROS".
 
-DÉBITS (argent sortant) :
-- VIR SEPA ACOMPTE/SALAIRE/LOYER = débit (on paie les salariés/loyer)
-- PRLV SEPA = prélèvement = débit (on nous prélève)
-- PAIEMENT CB = débit (on paie par carte)
-- COMCB = commission carte bancaire = débit
-- FRAIS PAIE CB = frais = débit
-- ECH PRET = échéance de prêt = débit
-- VIR SEPA INDEMNITES = débit (on verse des indemnités)
-- INTERETS/FRAIS = débit (frais bancaires)
-- VIR BOEHME ALLAN = débit (virement sortant du gérant)
-- VIR INST SOLDE SALAIRE = débit (on paie les salaires)
-- VIR INST EUROFEU = débit (on paie un fournisseur)
-- FACT SGT = débit (facturation de services bancaires)
-- PLAN SANTE / TNS PREVOYANCE / COMPLEMENTAIRE SANTE / AUTOMOBILE PRO = débit (cotisations)
+RÈGLES ABSOLUES :
+- Débit = argent qui SORT du compte (PRLV, PAIEMENT CB, VIR sortants salaires/loyer, COMCB, FRAIS, INTERETS/FRAIS, ECH PRET, cotisations)
+- Crédit = argent qui ENTRE dans le compte (REMCB = encaissements TPE, VIR PAYPAL PTE LTD, VIR entrants de tiers)
+- Un PRLV SEPA est TOUJOURS un débit
+- Un PAIEMENT CB est TOUJOURS un débit
+- Un REMCB est TOUJOURS un crédit
+- Un COMCB est un débit SAUF s'il est dans la colonne Crédit (rare, petits montants < 1€)
+- VIR SEPA ACOMPTE/SALAIRE/LOYER/FORFAIT/INDEMNITES ALLAN = débit
+- VIR INST SOLDE SALAIRE = débit
+- VIR PAYPAL PTE. LTD. = crédit
+- VIR ASP/DRFIP/EDENRED/CAP LOISIRS/LUDOBOX/FUNBOOKER/SOCOTEC/EUROFEU/ORANGE = crédit
+- VIR BOEHME ALLAN = débit (le gérant retire de l'argent)
+- INTERETS/FRAIS, FACT SGT, PLAN SANTE, TNS PREVOYANCE, COMPLEMENTAIRE SANTE, AUTOMOBILE PRO = débit
 
-CRÉDITS (argent entrant) :
-- REMCB = remise carte bancaire = crédit (encaissement TPE clients)
-- VIR PAYPAL PTE. LTD. = crédit (PayPal nous verse de l'argent)
-- VIR ASP AGENCE COMPTABLE = crédit (subvention/aide)
-- VIR DRFIP / VIR EDENRED / VIR SOCOTEC / VIR CAP LOISIRS / VIR LUDOBOX / VIR INST FUNBOOKER = crédit (on reçoit un paiement)
-- VIR ORANGE (remboursement) = crédit
+Exclure : SOLDE CREDITEUR, Total des mouvements, en-têtes de page, pieds de page.
 
-Réponds UNIQUEMENT en JSON: [{"date":"YYYY-MM-DD","label":"libellé court","debit":nombre_ou_null,"credit":nombre_ou_null}]
-- Dates DD/MM/YYYY → YYYY-MM-DD. Montants en nombres avec point décimal.
-- Exclure soldes, totaux, en-têtes. Garder uniquement la 1ère ligne du libellé.
+Réponds UNIQUEMENT en JSON valide :
+[{"date":"YYYY-MM-DD","label":"libellé court (1ère ligne seulement)","debit":nombre_ou_null,"credit":nombre_ou_null}]
 
-TEXTE:
-${chunk}`
+Montants : nombres avec point décimal (1234.56), pas de €.
+
+TEXTE DE LA PAGE :
+${pageText}`
       }],
     })
 
     const textBlock = response.content.find(b => b.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {
-      return NextResponse.json({ error: 'Pas de réponse IA' }, { status: 500 })
+      return NextResponse.json({ transactions: [] })
     }
 
     let jsonText = textBlock.text.trim()
@@ -70,10 +64,14 @@ ${chunk}`
       jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
     }
 
-    const transactions = JSON.parse(jsonText)
-    return NextResponse.json({ transactions })
+    try {
+      const transactions = JSON.parse(jsonText)
+      return NextResponse.json({ transactions })
+    } catch {
+      return NextResponse.json({ transactions: [] })
+    }
   } catch (error) {
     console.error('Parse text error:', error)
-    return NextResponse.json({ error: error instanceof Error ? error.message : 'Erreur' }, { status: 500 })
+    return NextResponse.json({ transactions: [] })
   }
 }
