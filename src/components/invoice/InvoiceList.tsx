@@ -38,20 +38,24 @@ export default function InvoiceList() {
 
   useEffect(() => {
     fetchInvoices()
-    fetchMatchedIds()
   }, [statusFilter])
 
-  const fetchMatchedIds = async () => {
-    try {
-      const res = await authFetch('/api/bank-statements/transactions?match_status=matched')
-      if (res.ok) {
-        const data = await res.json()
-        const txs = data.transactions || data || []
-        const ids = new Set<string>(txs.map((tx: any) => tx.matched_invoice_id).filter(Boolean))
-        setMatchedInvoiceIds(ids)
-      }
-    } catch { /* */ }
-  }
+  // Load matched IDs separately (non-blocking)
+  useEffect(() => {
+    const loadMatched = async () => {
+      try {
+        const res = await authFetch('/api/bank-statements/transactions?match_status=matched')
+        if (res.ok) {
+          const data = await res.json()
+          const txs = data.transactions || data || []
+          const ids = new Set<string>(txs.map((tx: any) => tx.matched_invoice_id).filter(Boolean))
+          setMatchedInvoiceIds(ids)
+        }
+      } catch { /* non-blocking */ }
+    }
+    loadMatched()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   const fetchInvoices = async () => {
     setLoading(true)
