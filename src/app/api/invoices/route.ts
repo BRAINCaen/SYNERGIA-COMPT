@@ -14,14 +14,21 @@ export async function GET(request: NextRequest) {
     const { searchParams } = new URL(request.url)
     const status = searchParams.get('status')
 
-    let query: FirebaseFirestore.Query = adminDb.collection('invoices').orderBy('created_at', 'desc')
+    // Simple query by user_id, sort in JS (avoid composite index)
+    const snap = await adminDb
+      .collection('invoices')
+      .where('user_id', '==', decoded.uid)
+      .get()
 
+    let invoices = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+
+    // Filter by status
     if (status && status !== 'all') {
-      query = query.where('status', '==', status)
+      invoices = invoices.filter((inv: any) => inv.status === status)
     }
 
-    const snap = await query.get()
-    const invoices = snap.docs.map((doc) => ({ id: doc.id, ...doc.data() }))
+    // Sort by created_at desc
+    invoices.sort((a: any, b: any) => (b.created_at || '').localeCompare(a.created_at || ''))
 
     return NextResponse.json(invoices)
   } catch (error) {
