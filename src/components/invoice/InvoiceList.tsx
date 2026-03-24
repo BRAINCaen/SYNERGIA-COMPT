@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge } from '@/components/ui/Badge'
-import { FileText, Search, Filter, ChevronDown, ChevronRight, Calendar, Trash2, X, CheckSquare } from 'lucide-react'
+import { FileText, Search, Filter, ChevronDown, ChevronRight, Calendar, Trash2, X, CheckSquare, Landmark } from 'lucide-react'
 import type { Invoice, InvoiceStatus } from '@/types'
 
 const MONTH_NAMES = [
@@ -33,11 +33,25 @@ export default function InvoiceList() {
   const [deleteTarget, setDeleteTarget] = useState<string | null>(null) // null = bulk, string = single id
   const [bulkStatusValue, setBulkStatusValue] = useState<InvoiceStatus | ''>('')
   const [actionLoading, setActionLoading] = useState(false)
+  const [matchedInvoiceIds, setMatchedInvoiceIds] = useState<Set<string>>(new Set())
   const authFetch = useAuthFetch()
 
   useEffect(() => {
     fetchInvoices()
+    fetchMatchedIds()
   }, [statusFilter])
+
+  const fetchMatchedIds = async () => {
+    try {
+      const res = await authFetch('/api/bank-statements/transactions?match_status=matched')
+      if (res.ok) {
+        const data = await res.json()
+        const txs = data.transactions || data || []
+        const ids = new Set<string>(txs.map((tx: any) => tx.matched_invoice_id).filter(Boolean))
+        setMatchedInvoiceIds(ids)
+      }
+    } catch { /* */ }
+  }
 
   const fetchInvoices = async () => {
     setLoading(true)
@@ -371,6 +385,7 @@ export default function InvoiceList() {
                 onToggleSelectAll={toggleSelectAll}
                 allSelected={allVisibleSelected}
                 onDeleteSingle={confirmDelete}
+                matchedInvoiceIds={matchedInvoiceIds}
               />
             </>
           )}
@@ -460,6 +475,7 @@ export default function InvoiceList() {
                         }}
                         allSelected={monthInvoices.every((inv) => selectedIds.has(inv.id))}
                         onDeleteSingle={confirmDelete}
+                        matchedInvoiceIds={matchedInvoiceIds}
                       />
                     )}
                   </div>
@@ -521,6 +537,7 @@ function InvoiceTable({
   onToggleSelectAll,
   allSelected,
   onDeleteSingle,
+  matchedInvoiceIds,
 }: {
   invoices: Invoice[]
   formatDate: (d: string | null) => string
@@ -530,6 +547,7 @@ function InvoiceTable({
   onToggleSelectAll: () => void
   allSelected: boolean
   onDeleteSingle: (id: string) => void
+  matchedInvoiceIds: Set<string>
 }) {
   return (
     <table className="w-full">
@@ -575,7 +593,20 @@ function InvoiceTable({
               <td className="px-4 py-3 text-sm text-gray-400">{invoice.invoice_number || '-'}</td>
               <td className="px-4 py-3 text-sm text-gray-500">{formatDate(invoice.invoice_date)}</td>
               <td className="px-4 py-3 text-right text-sm font-medium text-gray-200">{formatAmount(invoice.total_ttc)}</td>
-              <td className="px-4 py-3 text-center"><StatusBadge status={invoice.status} /></td>
+              <td className="px-4 py-3 text-center">
+                <div className="flex items-center justify-center gap-1.5">
+                  <StatusBadge status={invoice.status} />
+                  {matchedInvoiceIds && matchedInvoiceIds.has(invoice.id) ? (
+                    <span title="Rapprochee avec le releve bancaire" className="inline-flex items-center rounded bg-accent-green/10 p-0.5">
+                      <Landmark className="h-3 w-3 text-accent-green" />
+                    </span>
+                  ) : (invoice.status === 'validated' || invoice.status === 'exported') ? (
+                    <span title="Non rapprochee" className="inline-flex items-center rounded bg-accent-orange/10 p-0.5">
+                      <Landmark className="h-3 w-3 text-accent-orange" />
+                    </span>
+                  ) : null}
+                </div>
+              </td>
               <td className="w-10 px-2 py-3">
                 <button
                   onClick={(e) => {
