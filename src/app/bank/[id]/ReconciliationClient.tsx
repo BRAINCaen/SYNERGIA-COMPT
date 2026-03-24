@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import AppLayout from '@/components/layout/AppLayout'
 import { useRouter } from 'next/navigation'
@@ -17,6 +17,10 @@ import {
   ArrowDownRight,
   Loader2,
   Trash2,
+  ChevronDown,
+  Ban,
+  Clock,
+  ShieldOff,
 } from 'lucide-react'
 
 type TransactionStatus = 'matched' | 'unmatched' | 'ignored'
@@ -56,6 +60,7 @@ interface MatchCandidate {
   supplier?: string
   amount: number
   date: string
+  file_name?: string
 }
 
 export default function ReconciliationClient({ statementId }: { statementId: string }) {
@@ -72,6 +77,15 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [searchResults, setSearchResults] = useState<MatchCandidate[]>([])
   const [searching, setSearching] = useState(false)
   const [autoReconciling, setAutoReconciling] = useState(false)
+  const [ignoreDropdownTx, setIgnoreDropdownTx] = useState<string | null>(null)
+
+  // Close ignore dropdown on outside click
+  useEffect(() => {
+    if (!ignoreDropdownTx) return
+    const handleClick = () => setIgnoreDropdownTx(null)
+    const timer = setTimeout(() => document.addEventListener('click', handleClick), 0)
+    return () => { clearTimeout(timer); document.removeEventListener('click', handleClick) }
+  }, [ignoreDropdownTx])
 
   useEffect(() => {
     if (authLoading) return
@@ -193,6 +207,71 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     }
   }
 
+  const detectIgnorePattern = (label: string): { pattern: string; match_type: 'contains' | 'starts_with' | 'exact'; description: string } => {
+    const upper = (label || '').toUpperCase().trim()
+
+    // Known prefixes that should use starts_with
+    const knownPrefixes = [
+      'VIR SEPA ACOMPTE SALAIRE',
+      'VIR SEPA SALAIRE',
+      'VIR SEPA',
+      'PRLV SEPA',
+      'REMCB',
+      'COMCB',
+      'COTIS CARTE',
+      'FRAIS CARTE',
+      'F COTIS',
+      'RETRAIT DAB',
+      'ECH PRET',
+    ]
+
+    for (const prefix of knownPrefixes) {
+      if (upper.startsWith(prefix)) {
+        // For VIR SEPA patterns, try to include purpose words after prefix
+        if (prefix === 'VIR SEPA' && upper.length > prefix.length + 1) {
+          const rest = upper.substring(prefix.length).trim()
+          const words = rest.split(/\s+/)
+          // Take first 2-3 meaningful words as the pattern
+          const meaningful = words.filter((w) => w.length > 2).slice(0, 3)
+          if (meaningful.length > 0) {
+            const extended = prefix + ' ' + meaningful.join(' ')
+            return { pattern: extended, match_type: 'starts_with', description: `Auto: ${label.substring(0, 50)}` }
+          }
+        }
+        return { pattern: prefix, match_type: 'starts_with', description: `Auto: ${label.substring(0, 50)}` }
+      }
+    }
+
+    // For other labels, try to extract a meaningful company/entity name
+    // Remove trailing reference numbers, dates, etc.
+    const cleaned = upper.replace(/\s+\d{6,}.*$/, '').replace(/\s+DU\s+\d{2}\/\d{2}.*$/, '').trim()
+    if (cleaned.length > 3 && cleaned.length <= 60) {
+      return { pattern: cleaned, match_type: 'contains', description: `Auto: ${label.substring(0, 50)}` }
+    }
+
+    // Fallback: use first 30 chars as starts_with
+    const fallback = upper.substring(0, 30).trim()
+    return { pattern: fallback, match_type: 'starts_with', description: `Auto: ${label.substring(0, 50)}` }
+  }
+
+  const handleIgnoreAlways = async (tx: Transaction) => {
+    // 1. Ignore this transaction
+    await handleIgnore(tx.id)
+
+    // 2. Create an ignore rule
+    const { pattern, match_type, description } = detectIgnorePattern(tx.label)
+    try {
+      await authFetch('/api/ignore-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pattern, match_type, description }),
+      })
+    } catch (e) {
+      console.error('Create ignore rule error:', e)
+    }
+    setIgnoreDropdownTx(null)
+  }
+
   const handleUnmatch = async (txId: string) => {
     try {
       const res = await authFetch(`/api/bank-statements/${statementId}/transactions/${txId}`, {
@@ -212,30 +291,56 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     }
   }
 
-  const openMatchModal = (tx: Transaction) => {
+  const openMatchModal = async (tx: Transaction) => {
     setMatchModalTx(tx)
     setSearchQuery('')
+    setSearching(true)
     setSearchResults([])
+
+    // Auto-load ALL invoices sorted by closest amount
+    try {
+      const amount = tx.debit || tx.credit || 0
+      const res = await authFetch(`/api/invoices/search?amount=${amount}`)
+      if (res.ok) {
+        const data = await res.json()
+        const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
+          id: inv.id,
+          type: inv.document_type === 'revenue' ? 'revenue' : 'invoice',
+          name: inv.supplier_name || inv.file_name || 'Sans nom',
+          amount: inv.total_ttc || 0,
+          date: inv.invoice_date || '',
+          file_name: inv.file_name || '',
+        }))
+        setSearchResults(results)
+      }
+    } catch (e) {
+      console.error('Load invoices error:', e)
+    }
+    setSearching(false)
   }
 
   const handleSearch = async (query: string) => {
     setSearchQuery(query)
-    if (query.length < 2) {
-      setSearchResults([])
-      return
-    }
-
     setSearching(true)
     try {
-      const params = new URLSearchParams({ q: query, statement_id: statementId })
+      const params = new URLSearchParams()
+      if (query.length >= 1) params.set('q', query)
       if (matchModalTx) {
         const amount = matchModalTx.debit || matchModalTx.credit || 0
         params.set('amount', String(amount))
       }
-      const res = await authFetch(`/api/bank-statements/match-search?${params.toString()}`)
+      const res = await authFetch(`/api/invoices/search?${params.toString()}`)
       if (res.ok) {
         const data = await res.json()
-        setSearchResults(data.results || [])
+        const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
+          id: inv.id,
+          type: inv.document_type === 'revenue' ? 'revenue' : 'invoice',
+          name: inv.supplier_name || inv.file_name || 'Sans nom',
+          amount: inv.total_ttc || 0,
+          date: inv.invoice_date || '',
+          file_name: inv.file_name || '',
+        }))
+        setSearchResults(results)
       }
     } catch (e) {
       console.error('Search error:', e)
@@ -247,21 +352,16 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     if (!matchModalTx) return
 
     try {
+      const body: Record<string, string> = { transaction_id: matchModalTx.id }
+      if (candidate.type === 'invoice') body.invoice_id = candidate.id
+      else body.revenue_id = candidate.id
+
       const res = await authFetch(
-        `/api/bank-statements/${statementId}/transactions/${matchModalTx.id}`,
+        `/api/bank-statements/${statementId}/match`,
         {
-          method: 'PATCH',
+          method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            status: 'matched',
-            matched_entity: {
-              id: candidate.id,
-              type: candidate.type,
-              name: candidate.name,
-              amount: candidate.amount,
-              date: candidate.date,
-            },
-          }),
+          body: JSON.stringify(body),
         }
       )
       if (res.ok) {
@@ -475,12 +575,33 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                             >
                               Pointer
                             </button>
-                            <button
-                              onClick={() => handleIgnore(tx.id)}
-                              className="rounded px-2 py-1 text-xs text-gray-500 hover:bg-dark-hover hover:text-gray-300 transition-colors"
-                            >
-                              Ignorer
-                            </button>
+                            <div className="relative">
+                              <button
+                                onClick={() => setIgnoreDropdownTx(ignoreDropdownTx === tx.id ? null : tx.id)}
+                                className="flex items-center gap-0.5 rounded px-2 py-1 text-xs text-gray-500 hover:bg-dark-hover hover:text-gray-300 transition-colors"
+                              >
+                                Ignorer
+                                <ChevronDown className="h-3 w-3" />
+                              </button>
+                              {ignoreDropdownTx === tx.id && (
+                                <div className="absolute right-0 top-full z-30 mt-1 w-48 rounded-lg border border-dark-border bg-dark-card shadow-xl">
+                                  <button
+                                    onClick={() => { handleIgnore(tx.id); setIgnoreDropdownTx(null) }}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-dark-hover transition-colors rounded-t-lg"
+                                  >
+                                    <Clock className="h-3.5 w-3.5 text-gray-500" />
+                                    Ce mois
+                                  </button>
+                                  <button
+                                    onClick={() => handleIgnoreAlways(tx)}
+                                    className="flex w-full items-center gap-2 px-3 py-2 text-left text-xs text-gray-300 hover:bg-dark-hover transition-colors rounded-b-lg border-t border-dark-border"
+                                  >
+                                    <ShieldOff className="h-3.5 w-3.5 text-accent-orange" />
+                                    Toujours (creer une regle)
+                                  </button>
+                                </div>
+                              )}
+                            </div>
                           </>
                         )}
                         {tx.status === 'matched' && (

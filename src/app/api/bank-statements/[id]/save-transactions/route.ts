@@ -19,8 +19,36 @@ export async function POST(
       return NextResponse.json({ error: 'Pas de transactions' }, { status: 400 })
     }
 
+    // Fetch ignore rules for user
+    const ignoreRulesSnap = await adminDb
+      .collection('ignoreRules')
+      .where('user_id', '==', decoded.uid)
+      .get()
+    const ignoreRules = ignoreRulesSnap.docs.map((d) => d.data() as {
+      pattern: string
+      match_type: 'contains' | 'starts_with' | 'exact'
+    })
+
+    const matchesIgnoreRule = (label: string): boolean => {
+      const upper = (label || '').toUpperCase()
+      return ignoreRules.some((rule) => {
+        const pat = rule.pattern.toUpperCase()
+        switch (rule.match_type) {
+          case 'exact':
+            return upper === pat
+          case 'starts_with':
+            return upper.startsWith(pat)
+          case 'contains':
+            return upper.includes(pat)
+          default:
+            return false
+        }
+      })
+    }
+
     let totalDebits = 0
     let totalCredits = 0
+    let ignoredCount = 0
 
     // Write in batches of 490
     for (let i = 0; i < transactions.length; i += 490) {
@@ -34,6 +62,9 @@ export async function POST(
         if (isDebit) totalDebits += amount
         else totalCredits += amount
 
+        const shouldIgnore = matchesIgnoreRule(t.label)
+        if (shouldIgnore) ignoredCount++
+
         const ref = adminDb.collection('bankTransactions').doc()
         batch.set(ref, {
           id: ref.id,
@@ -43,7 +74,7 @@ export async function POST(
           label: t.label,
           amount,
           type: isDebit ? 'debit' : 'credit',
-          match_status: 'unmatched',
+          match_status: shouldIgnore ? 'ignored' : 'unmatched',
           matched_invoice_id: null,
           created_at: new Date().toISOString(),
         })
@@ -82,6 +113,7 @@ export async function POST(
       total_debits: Math.round(totalDebits * 100) / 100,
       total_credits: Math.round(totalCredits * 100) / 100,
       period_month: periodMonth,
+      ignored_count: ignoredCount,
     })
   } catch (error) {
     console.error('Save transactions error:', error)
