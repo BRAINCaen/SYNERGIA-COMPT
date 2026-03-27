@@ -69,7 +69,7 @@ Règles :
         })
         break
       } catch (e: any) {
-        if (e?.status === 429 && attempt < 2) {
+        if ((e?.status === 429 || e?.status === 529) && attempt < 2) {
           await new Promise(r => setTimeout(r, 10000 * (attempt + 1)))
           continue
         }

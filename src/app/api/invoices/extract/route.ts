@@ -127,16 +127,25 @@ export async function POST(request: NextRequest) {
           { type: 'text' as const, text: EXTRACTION_PROMPT },
         ]
 
-    const response = await anthropic.messages.create({
-      model: EXTRACTION_MODEL,
-      max_tokens: MAX_TOKENS,
-      messages: [
-        {
-          role: 'user',
-          content,
-        },
-      ],
-    })
+    // Retry on 429/529 errors
+    let response
+    for (let attempt = 0; attempt < 3; attempt++) {
+      try {
+        response = await anthropic.messages.create({
+          model: EXTRACTION_MODEL,
+          max_tokens: MAX_TOKENS,
+          messages: [{ role: 'user', content }],
+        })
+        break
+      } catch (e: any) {
+        if ((e?.status === 429 || e?.status === 529) && attempt < 2) {
+          await new Promise(r => setTimeout(r, 10000 * (attempt + 1)))
+          continue
+        }
+        throw e
+      }
+    }
+    if (!response) throw new Error('Pas de réponse après 3 tentatives')
 
     const textBlock = response.content.find((block) => block.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {

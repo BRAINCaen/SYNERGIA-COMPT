@@ -60,7 +60,7 @@ Montants en nombres avec point décimal (1234.56). advance_amount = 0 si aucun a
         })
         break
       } catch (e: any) {
-        if (e?.status === 429 && attempt < 2) {
+        if ((e?.status === 429 || e?.status === 529) && attempt < 2) {
           await new Promise(r => setTimeout(r, 10000 * (attempt + 1)))
           continue
         }
