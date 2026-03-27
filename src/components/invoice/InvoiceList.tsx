@@ -35,6 +35,7 @@ export default function InvoiceList() {
   const [actionLoading, setActionLoading] = useState(false)
   const [matchedInvoiceIds, setMatchedInvoiceIds] = useState<Set<string>>(new Set())
   const [rescanningIds, setRescanningIds] = useState<Set<string>>(new Set())
+  const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false)
   const authFetch = useAuthFetch()
 
   const rescanInvoice = async (invoiceId: string) => {
@@ -177,15 +178,21 @@ export default function InvoiceList() {
   // Filter by search
   const filtered = useMemo(() => {
     return invoices.filter((inv) => {
-      if (!search) return true
-      const q = search.toLowerCase()
-      return (
-        inv.file_name.toLowerCase().includes(q) ||
-        inv.supplier_name?.toLowerCase().includes(q) ||
-        inv.invoice_number?.toLowerCase().includes(q)
-      )
+      // Search filter
+      if (search) {
+        const q = search.toLowerCase()
+        const matches = inv.file_name.toLowerCase().includes(q) ||
+          inv.supplier_name?.toLowerCase().includes(q) ||
+          inv.invoice_number?.toLowerCase().includes(q)
+        if (!matches) return false
+      }
+      // Unmatched only filter
+      if (showUnmatchedOnly) {
+        if (matchedInvoiceIds.has(inv.id)) return false
+      }
+      return true
     })
-  }, [invoices, search])
+  }, [invoices, search, showUnmatchedOnly, matchedInvoiceIds])
 
   // Get available years
   const years = useMemo(() => {
@@ -414,6 +421,16 @@ export default function InvoiceList() {
             <option value="exported">Exporté</option>
             <option value="error">Erreur</option>
           </select>
+          <label className="flex items-center gap-2 cursor-pointer whitespace-nowrap">
+            <input
+              type="checkbox"
+              checked={showUnmatchedOnly}
+              onChange={() => setShowUnmatchedOnly(!showUnmatchedOnly)}
+              className="h-4 w-4 rounded border-dark-border bg-dark-input text-accent-orange focus:ring-accent-orange/50"
+            />
+            <span className="text-xs text-gray-400">Non rapprochees</span>
+            <Landmark className="h-3.5 w-3.5 text-accent-orange" />
+          </label>
         </div>
       </div>
 

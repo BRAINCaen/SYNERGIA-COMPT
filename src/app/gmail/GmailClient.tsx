@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useSearchParams } from 'next/navigation'
-import { useAuthFetch } from '@/lib/firebase/auth-context'
+import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import {
   Mail,
   Search,
@@ -42,6 +42,7 @@ interface ImportErrors {
 
 export default function GmailClient() {
   const searchParams = useSearchParams()
+  const { user } = useAuth()
   const authFetch = useAuthFetch()
 
   const [connected, setConnected] = useState(false)
@@ -64,7 +65,7 @@ export default function GmailClient() {
   const [importErrors, setImportErrors] = useState<ImportErrors>({})
 
   // Check connection status
-  const checkStatus = useCallback(async () => {
+  const checkStatus = async () => {
     try {
       const res = await authFetch('/api/gmail/status')
       if (res.ok) {
@@ -77,11 +78,13 @@ export default function GmailClient() {
     } finally {
       setLoading(false)
     }
-  }, [authFetch])
+  }
 
   useEffect(() => {
-    checkStatus()
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (user) checkStatus()
+    else setLoading(false)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
 
   // Handle callback params
   useEffect(() => {
