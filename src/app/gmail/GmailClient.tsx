@@ -107,9 +107,11 @@ export default function GmailClient() {
         invalid_state: 'Etat invalide. Veuillez reessayer.',
         config_missing: 'Configuration serveur manquante.',
         no_token: "Aucun token recu de Google.",
-        callback_failed: 'Erreur lors du retour Google. Veuillez reessayer.',
+        callback_failed: 'Erreur lors du retour Google.',
       }
-      setError(errorMessages[errorParam] || `Erreur: ${errorParam}`)
+      const detail = searchParams.get('detail')
+      const msg = errorMessages[errorParam] || `Erreur: ${errorParam}`
+      setError(detail ? `${msg} Detail: ${decodeURIComponent(detail)}` : msg)
       window.history.replaceState({}, '', '/gmail')
     }
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps

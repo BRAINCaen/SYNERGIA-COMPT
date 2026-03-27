@@ -71,8 +71,9 @@ export async function GET(request: NextRequest) {
 
     return NextResponse.redirect(`${appUrl}/gmail?gmail=connected`)
   } catch (error) {
-    console.error('Gmail callback error:', error)
+    console.error('Gmail callback error:', error instanceof Error ? error.message : error, error instanceof Error ? error.stack : '')
     const appUrl = process.env.NEXT_PUBLIC_APP_URL || ''
-    return NextResponse.redirect(`${appUrl}/gmail?error=callback_failed`)
+    const errMsg = encodeURIComponent(error instanceof Error ? error.message : 'unknown')
+    return NextResponse.redirect(`${appUrl}/gmail?error=callback_failed&detail=${errMsg}`)
   }
 }
