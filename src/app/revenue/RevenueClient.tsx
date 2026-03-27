@@ -609,9 +609,34 @@ export default function RevenueClient() {
                           </td>
                           <td className="px-4 py-3">
                             {bankMatchedEntries[entry.id] ? (
-                              <span className="flex items-center gap-1 rounded bg-accent-green/10 px-2 py-1 text-[10px] font-medium text-accent-green">
-                                <CheckCircle className="h-3 w-3" /> Rapproche
-                              </span>
+                              <button
+                                onClick={async () => {
+                                  if (!confirm('Annuler le rapprochement ?')) return
+                                  try {
+                                    const txIds = bankMatchedEntries[entry.id]
+                                    for (const txId of txIds) {
+                                      const txRes = await authFetch('/api/bank-statements/transactions?match_status=matched')
+                                      if (txRes.ok) {
+                                        const txData = await txRes.json()
+                                        const txs = txData.transactions || txData || []
+                                        const tx = txs.find((t: any) => t.id === txId)
+                                        if (tx?.statement_id) {
+                                          await authFetch(`/api/bank-statements/${tx.statement_id}/match`, {
+                                            method: 'DELETE',
+                                            headers: { 'Content-Type': 'application/json' },
+                                            body: JSON.stringify({ transaction_id: txId }),
+                                          })
+                                        }
+                                      }
+                                    }
+                                    setBankMatchedEntries(prev => { const next = { ...prev }; delete next[entry.id]; return next })
+                                  } catch (e) { console.error('Unmatch error:', e) }
+                                }}
+                                className="flex items-center gap-1 rounded bg-accent-green/10 px-2 py-1 text-[10px] font-medium text-accent-green hover:bg-accent-red/10 hover:text-accent-red transition-colors"
+                                title="Cliquer pour annuler le rapprochement"
+                              >
+                                <CheckCircle className="h-3 w-3" /> Rapproche ✕
+                              </button>
                             ) : (
                               <button
                                 onClick={() => openBankMatch(entry.id)}
