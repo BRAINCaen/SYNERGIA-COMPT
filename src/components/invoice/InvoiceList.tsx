@@ -4,7 +4,7 @@ import { useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge } from '@/components/ui/Badge'
-import { FileText, Search, Filter, ChevronDown, ChevronRight, Calendar, Trash2, X, CheckSquare, Landmark } from 'lucide-react'
+import { FileText, Search, Filter, ChevronDown, ChevronRight, Calendar, Trash2, X, CheckSquare, Landmark, RefreshCw, Loader2 } from 'lucide-react'
 import type { Invoice, InvoiceStatus } from '@/types'
 
 const MONTH_NAMES = [
@@ -34,7 +34,107 @@ export default function InvoiceList() {
   const [bulkStatusValue, setBulkStatusValue] = useState<InvoiceStatus | ''>('')
   const [actionLoading, setActionLoading] = useState(false)
   const [matchedInvoiceIds, setMatchedInvoiceIds] = useState<Set<string>>(new Set())
+  const [rescanningIds, setRescanningIds] = useState<Set<string>>(new Set())
   const authFetch = useAuthFetch()
+
+  const rescanInvoice = async (invoiceId: string) => {
+    setRescanningIds(prev => new Set(prev).add(invoiceId))
+    try {
+      // Get invoice to get file_path
+      const invRes = await authFetch(`/api/invoices/${invoiceId}`)
+      if (!invRes.ok) throw new Error('Facture non trouvée')
+      const invData = await invRes.json()
+
+      if (!invData.file_url && !invData.file_path) {
+        throw new Error('Pas de fichier associé')
+      }
+
+      // Download the PDF via proxy
+      const pdfRes = await authFetch(`/api/proxy-pdf?path=${encodeURIComponent(invData.file_path)}`)
+      if (!pdfRes.ok) throw new Error('Téléchargement échoué')
+      const pdfBlob = await pdfRes.blob()
+
+      // Send to extract
+      const extractForm = new FormData()
+      extractForm.append('file', new File([pdfBlob], invData.file_name || 'document.pdf', { type: 'application/pdf' }))
+      const extractRes = await authFetch('/api/invoices/extract', { method: 'POST', body: extractForm })
+      if (!extractRes.ok) throw new Error('Erreur extraction')
+      const { data: extraction } = await extractRes.json()
+
+      // Update invoice with extracted data
+      const newFileName = extraction.supplier?.name && extraction.totals?.total_ttc
+        ? `${extraction.supplier.name.toUpperCase()}-${extraction.totals.total_ttc.toFixed(2).replace('.', ',')}€.pdf`
+        : invData.file_name
+
+      await authFetch(`/api/invoices/${invoiceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_name: newFileName,
+          supplier_name: extraction.supplier?.name,
+          supplier_siret: extraction.supplier?.siret || null,
+          invoice_number: extraction.invoice?.number || null,
+          invoice_date: extraction.invoice?.date || null,
+          due_date: extraction.invoice?.due_date || null,
+          total_ht: extraction.totals?.total_ht || null,
+          total_tva: extraction.totals?.total_tva || null,
+          total_ttc: extraction.totals?.total_ttc || null,
+          raw_extraction: extraction,
+          status: 'processing',
+        }),
+      })
+
+      // Now classify
+      const classifyRes = await authFetch('/api/invoices/classify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          lines: extraction.lines || [],
+          supplier_name: extraction.supplier?.name || 'Inconnu',
+        }),
+      })
+
+      if (classifyRes.ok) {
+        const classifyData = await classifyRes.json()
+        // Save lines
+        if (classifyData.classifications) {
+          const lines = (extraction.lines || []).map((line: any, i: number) => {
+            const c = classifyData.classifications?.find((cl: any) => cl.line_index === i)
+            return {
+              invoice_id: invoiceId,
+              description: line.description || '',
+              quantity: line.quantity || 1,
+              unit_price: line.unit_price || line.total_ht,
+              total_ht: line.total_ht || 0,
+              tva_rate: line.tva_rate || null,
+              tva_amount: line.tva_amount || null,
+              total_ttc: line.total_ttc || null,
+              pcg_code: c?.pcg_code || null,
+              pcg_label: c?.pcg_label || null,
+              confidence_score: c?.confidence || null,
+              manually_corrected: false,
+              journal_code: c?.journal_code || 'AC',
+              reasoning: c?.reasoning || null,
+              is_immobilization: c?.is_immobilization || false,
+              amortization_rate: c?.amortization_rate || null,
+              classification_method: c?.classification_method || 'ai',
+            }
+          })
+
+          await authFetch(`/api/invoices/${invoiceId}`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ status: 'classified' }),
+          })
+        }
+      }
+
+      fetchInvoices()
+    } catch (e) {
+      console.error('Rescan error:', e)
+    }
+    setRescanningIds(prev => { const next = new Set(prev); next.delete(invoiceId); return next })
+  }
 
   useEffect(() => {
     fetchInvoices()
@@ -390,6 +490,8 @@ export default function InvoiceList() {
                 allSelected={allVisibleSelected}
                 onDeleteSingle={confirmDelete}
                 matchedInvoiceIds={matchedInvoiceIds}
+                onRescan={rescanInvoice}
+                rescanningIds={rescanningIds}
               />
             </>
           )}
@@ -480,6 +582,8 @@ export default function InvoiceList() {
                         allSelected={monthInvoices.every((inv) => selectedIds.has(inv.id))}
                         onDeleteSingle={confirmDelete}
                         matchedInvoiceIds={matchedInvoiceIds}
+                        onRescan={rescanInvoice}
+                        rescanningIds={rescanningIds}
                       />
                     )}
                   </div>
@@ -542,6 +646,8 @@ function InvoiceTable({
   allSelected,
   onDeleteSingle,
   matchedInvoiceIds,
+  onRescan,
+  rescanningIds,
 }: {
   invoices: Invoice[]
   formatDate: (d: string | null) => string
@@ -552,6 +658,8 @@ function InvoiceTable({
   allSelected: boolean
   onDeleteSingle: (id: string) => void
   matchedInvoiceIds: Set<string>
+  onRescan: (id: string) => void
+  rescanningIds: Set<string>
 }) {
   return (
     <table className="w-full">
@@ -611,7 +719,18 @@ function InvoiceTable({
                   ) : null}
                 </div>
               </td>
-              <td className="w-10 px-2 py-3">
+              <td className="w-16 px-2 py-3">
+                <div className="flex items-center gap-1">
+                {(invoice.status === 'pending' || invoice.status === 'error' || (!invoice.supplier_name && !invoice.total_ttc)) && (
+                  <button
+                    onClick={(e) => { e.stopPropagation(); onRescan(invoice.id) }}
+                    disabled={rescanningIds.has(invoice.id)}
+                    className="rounded p-1 text-accent-orange hover:bg-accent-orange/10 disabled:opacity-50"
+                    title="Relancer le scan IA"
+                  >
+                    {rescanningIds.has(invoice.id) ? <Loader2 className="h-4 w-4 animate-spin" /> : <RefreshCw className="h-4 w-4" />}
+                  </button>
+                )}
                 <button
                   onClick={(e) => {
                     e.stopPropagation()
@@ -622,6 +741,7 @@ function InvoiceTable({
                 >
                   <Trash2 className="h-4 w-4" />
                 </button>
+                </div>
               </td>
             </tr>
           )
