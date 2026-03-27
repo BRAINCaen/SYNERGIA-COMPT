@@ -6,7 +6,7 @@ import { useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge, ConfidenceBadge } from '@/components/ui/Badge'
 import PCGSelector from './PCGSelector'
 import {
-  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package, Landmark, Link, Search,
+  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package, Landmark, Link, Search, X,
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import type { Invoice, InvoiceLine, PCGAccount } from '@/types'
@@ -34,6 +34,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [bankSearching, setBankSearching] = useState(false)
   const [bankMatched, setBankMatched] = useState<string | null>(null)
   const [bankMatchCount, setBankMatchCount] = useState(0)
+  const [matchedTxDetails, setMatchedTxDetails] = useState<any[]>([])
   const [selectedBankTxIds, setSelectedBankTxIds] = useState<string[]>([])
   const [bankMatching, setBankMatching] = useState(false)
 
@@ -82,6 +83,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
           const txs = txData.transactions || txData || []
           const matchedTxs = txs.filter((tx: any) => tx.matched_invoice_id === invoiceId)
           setBankMatchCount(matchedTxs.length)
+          setMatchedTxDetails(matchedTxs)
           if (matchedTxs.length > 0) setBankMatched('existing')
         }
       } catch { /* non-blocking */ }
@@ -548,16 +550,53 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
         </div>
       </div>
 
-      {/* Bank match badge */}
-      {bankMatchCount > 0 && !showBankMatch && (
-        <div className="flex items-center gap-2 rounded-lg border border-accent-green/30 bg-accent-green/5 px-4 py-2">
-          <CheckCircle className="h-4 w-4 text-accent-green" />
-          <span className="text-sm text-accent-green font-medium">
-            {bankMatchCount} transaction(s) bancaire(s) rapprochee(s)
-          </span>
-          <span className="text-xs text-gray-500 ml-2">
-            Cliquez "Rapprocher +" pour en ajouter d&apos;autres
-          </span>
+      {/* Bank match details */}
+      {matchedTxDetails.length > 0 && !showBankMatch && (
+        <div className="card space-y-3">
+          <div className="flex items-center justify-between">
+            <div className="flex items-center gap-2">
+              <CheckCircle className="h-4 w-4 text-accent-green" />
+              <span className="text-sm font-semibold text-accent-green">
+                {matchedTxDetails.length} transaction(s) rapprochee(s)
+              </span>
+            </div>
+            <span className="text-xs text-gray-500">Cliquez &quot;Rapprocher +&quot; pour en ajouter</span>
+          </div>
+          <div className="space-y-1">
+            {matchedTxDetails.map((tx: any) => (
+              <div key={tx.id} className="flex items-center justify-between rounded-lg border border-accent-green/20 bg-accent-green/5 px-3 py-2">
+                <div className="flex items-center gap-3 min-w-0">
+                  <span className="text-xs font-mono text-gray-400 shrink-0">
+                    {tx.date ? new Date(tx.date).toLocaleDateString('fr-FR') : '-'}
+                  </span>
+                  <span className="text-sm text-gray-200 truncate">{tx.label}</span>
+                </div>
+                <div className="flex items-center gap-2 shrink-0">
+                  <span className={`font-mono text-sm font-medium ${tx.type === 'debit' ? 'text-accent-red' : 'text-accent-green'}`}>
+                    {(tx.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €
+                  </span>
+                  <button
+                    onClick={async () => {
+                      if (!confirm('Annuler ce rapprochement ?')) return
+                      try {
+                        await authFetch(`/api/bank-statements/${tx.statement_id}/match`, {
+                          method: 'DELETE',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ transaction_id: tx.id }),
+                        })
+                        setMatchedTxDetails(prev => prev.filter(t => t.id !== tx.id))
+                        setBankMatchCount(prev => prev - 1)
+                      } catch (e) { console.error('Unmatch error:', e) }
+                    }}
+                    className="rounded p-1 text-gray-500 hover:bg-accent-red/10 hover:text-accent-red transition-colors"
+                    title="Annuler ce rapprochement"
+                  >
+                    <X className="h-3.5 w-3.5" />
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
         </div>
       )}
 

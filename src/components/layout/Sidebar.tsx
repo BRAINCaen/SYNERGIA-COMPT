@@ -14,12 +14,14 @@ import {
   Landmark,
   Coins,
   Users,
+  Mail,
 } from 'lucide-react'
 
 const navigation = [
   { name: 'Tableau de bord', href: '/', icon: LayoutDashboard },
   { name: 'Factures', href: '/invoices', icon: FileText },
   { name: 'Upload', href: '/invoices/upload', icon: Upload },
+  { name: 'Scanner Gmail', href: '/gmail', icon: Mail },
   { name: 'Releves bancaires', href: '/bank', icon: Landmark },
   { name: 'Encaissements', href: '/revenue', icon: Coins },
   { name: 'Personnel', href: '/personnel', icon: Users },
