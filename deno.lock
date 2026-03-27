@@ -20,6 +20,7 @@
         "npm:autoprefixer@^10.4.20",
         "npm:firebase-admin@13",
         "npm:firebase@^11.3.0",
+        "npm:googleapis@^171.4.0",
         "npm:lucide-react@0.468",
         "npm:next@14.2.21",
         "npm:papaparse@^5.5.3",
