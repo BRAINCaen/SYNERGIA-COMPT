@@ -89,6 +89,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [multiMatchModal, setMultiMatchModal] = useState(false)
   const [autoRulePattern, setAutoRulePattern] = useState('')
   const [createAutoRule, setCreateAutoRule] = useState(false)
+  const [showAllDocs, setShowAllDocs] = useState(false)
 
   // Close ignore dropdown on outside click
   useEffect(() => {
@@ -373,8 +374,9 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     // Auto-load ALL invoices sorted by closest amount
     try {
       const amount = tx.debit || tx.credit || 0
-      const txType = tx.debit ? 'debit' : 'credit'
-      const res = await authFetch(`/api/invoices/search?amount=${amount}&type=${txType}`)
+      const txType = showAllDocs ? '' : (tx.debit ? 'debit' : 'credit')
+      const typeParam = txType ? `&type=${txType}` : ''
+      const res = await authFetch(`/api/invoices/search?amount=${amount}${typeParam}`)
       if (res.ok) {
         const data = await res.json()
         const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
@@ -402,7 +404,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
       if (matchModalTx) {
         const amount = matchModalTx.debit || matchModalTx.credit || 0
         params.set('amount', String(amount))
-        params.set('type', matchModalTx.debit ? 'debit' : 'credit')
+        if (!showAllDocs) params.set('type', matchModalTx.debit ? 'debit' : 'credit')
       }
       const res = await authFetch(`/api/invoices/search?${params.toString()}`)
       if (res.ok) {
@@ -833,6 +835,32 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                   <Loader2 className="absolute right-3 top-1/2 h-4 w-4 -translate-y-1/2 animate-spin text-gray-500" />
                 )}
               </div>
+
+              {/* Toggle to show all document types */}
+              <label className="flex items-center gap-2 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={showAllDocs}
+                  onChange={() => {
+                    setShowAllDocs(!showAllDocs)
+                    if (matchModalTx) {
+                      const amount = matchModalTx.debit || matchModalTx.credit || 0
+                      const typeParam = !showAllDocs ? '' : `&type=${matchModalTx.debit ? 'debit' : 'credit'}`
+                      authFetch(`/api/invoices/search?amount=${amount}${typeParam}`)
+                        .then(res => res.ok ? res.json() : { invoices: [] })
+                        .then(data => {
+                          setSearchResults((data.invoices || []).map((inv: any) => ({
+                            id: inv.id, type: inv.document_type === 'revenue' ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
+                            name: inv.supplier_name || inv.file_name || 'Sans nom',
+                            amount: inv.total_ttc || 0, date: inv.invoice_date || '', file_name: inv.file_name || '',
+                          })))
+                        })
+                    }
+                  }}
+                  className="h-3.5 w-3.5 rounded border-dark-border bg-dark-input text-accent-orange focus:ring-accent-orange/50"
+                />
+                <span className="text-xs text-gray-400">Voir tous les documents (factures + encaissements + bulletins)</span>
+              </label>
 
               {/* Results with checkboxes + eye preview */}
               <div className="max-h-64 space-y-1.5 overflow-y-auto">
