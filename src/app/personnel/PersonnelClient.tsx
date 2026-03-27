@@ -322,7 +322,20 @@ export default function PersonnelClient() {
                   )}
                 </div>
                 {uf.status === 'done' && <Check className="h-5 w-5 text-accent-green shrink-0" />}
-                {uf.status === 'error' && <AlertTriangle className="h-5 w-5 text-accent-red shrink-0" />}
+                {uf.status === 'error' && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setUploadingFiles(prev => prev.map((f, j) => j === i ? { ...f, status: 'uploading', error: undefined, progress: 10 } : f))
+                        setTimeout(() => processFile(uf.file, i), 500)
+                      }}
+                      className="rounded-lg bg-accent-orange/10 px-3 py-1 text-xs font-medium text-accent-orange hover:bg-accent-orange/20 transition-colors shrink-0"
+                    >
+                      Reessayer
+                    </button>
+                    <AlertTriangle className="h-5 w-5 text-accent-red shrink-0" />
+                  </>
+                )}
                 {uf.status === 'extracting' && <Loader2 className="h-5 w-5 animate-spin text-accent-green shrink-0" />}
               </div>
             ))}

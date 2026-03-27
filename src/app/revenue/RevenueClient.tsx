@@ -488,7 +488,20 @@ export default function RevenueClient() {
                   )}
                 </div>
                 {uf.status === 'done' && <Check className="h-5 w-5 shrink-0 text-accent-green" />}
-                {uf.status === 'error' && <AlertTriangle className="h-5 w-5 shrink-0 text-accent-red" />}
+                {uf.status === 'error' && (
+                  <>
+                    <button
+                      onClick={() => {
+                        setUploadingFiles(prev => prev.map((f, j) => j === i ? { ...f, status: 'uploading', error: undefined, progress: 10 } : f))
+                        setTimeout(() => processFile(uf.file, i), 500)
+                      }}
+                      className="rounded-lg bg-accent-orange/10 px-3 py-1 text-xs font-medium text-accent-orange hover:bg-accent-orange/20 transition-colors shrink-0"
+                    >
+                      Reessayer
+                    </button>
+                    <AlertTriangle className="h-5 w-5 shrink-0 text-accent-red" />
+                  </>
+                )}
                 {uf.status === 'extracting' && (
                   <Loader2 className="h-5 w-5 shrink-0 animate-spin text-accent-green" />
                 )}

@@ -511,6 +511,17 @@ export default function InvoiceUploader() {
                   {f.error && <p className="mt-1 text-xs text-accent-red">{f.error}</p>}
                 </div>
                 <div className="flex items-center gap-2">
+                  {f.status === 'error' && (
+                    <button
+                      onClick={() => {
+                        setFiles(prev => prev.map((file, i) => i === index ? { ...file, status: 'pending', error: undefined, progress: 0 } : file))
+                        setTimeout(() => processFile(index), 500)
+                      }}
+                      className="rounded-lg bg-accent-orange/10 px-3 py-1 text-xs font-medium text-accent-orange hover:bg-accent-orange/20 transition-colors"
+                    >
+                      Reessayer
+                    </button>
+                  )}
                   {getStatusIcon(f.status)}
                   {f.status === 'pending' && (
                     <button onClick={() => removeFile(index)} className="rounded p-1 text-gray-500 hover:bg-dark-hover hover:text-gray-300">
