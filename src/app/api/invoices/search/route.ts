@@ -52,6 +52,35 @@ export async function GET(request: NextRequest) {
         .filter(Boolean)
 
       results.push(...invoices)
+
+      // Also load payslips for debit transactions (salaries, advances)
+      const paySnap = await adminDb
+        .collection('payslips')
+        .where('user_id', '==', decoded.uid)
+        .get()
+
+      const payslips = paySnap.docs.map(doc => {
+        const d = doc.data()
+        return {
+          id: doc.id,
+          source: 'payslip' as const,
+          file_name: d.file_name || '',
+          name: `Bulletin ${d.employee_name || ''} ${d.month || ''}`.trim(),
+          invoice_number: '',
+          date: d.month ? `${d.month}-01` : '',
+          total_ht: d.net_salary || d.gross_salary || 0,
+          total_ttc: d.net_salary || d.gross_salary || 0,
+          // Also expose individual amounts for matching
+          advance_amount: d.advance_amount || 0,
+          remaining_salary: d.remaining_salary || 0,
+          gross_salary: d.gross_salary || 0,
+          status: d.status || '',
+          document_type: 'payslip',
+          type: 'payslip' as const,
+        }
+      })
+
+      results.push(...payslips)
     }
 
     if (txType !== 'debit') {
@@ -145,7 +174,10 @@ export async function GET(request: NextRequest) {
       total_ttc: r.total_ttc,
       status: r.status,
       document_type: r.document_type,
-      type: r.type, // 'invoice' or 'revenue'
+      type: r.type, // 'invoice', 'revenue', or 'payslip'
+      // Payslip-specific amounts for matching
+      advance_amount: r.advance_amount || null,
+      remaining_salary: r.remaining_salary || null,
     }))
 
     return NextResponse.json({ invoices })
