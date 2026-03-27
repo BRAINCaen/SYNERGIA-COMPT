@@ -33,6 +33,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [bankTransactions, setBankTransactions] = useState<any[]>([])
   const [bankSearching, setBankSearching] = useState(false)
   const [bankMatched, setBankMatched] = useState<string | null>(null)
+  const [bankMatchCount, setBankMatchCount] = useState(0)
   const [selectedBankTxIds, setSelectedBankTxIds] = useState<string[]>([])
   const [bankMatching, setBankMatching] = useState(false)
 
@@ -72,6 +73,18 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
         total_ttc: data.total_ttc,
       })
       setAmountsModified(false)
+
+      // Check how many bank transactions are matched to this invoice
+      try {
+        const txRes = await authFetch('/api/bank-statements/transactions?match_status=matched')
+        if (txRes.ok) {
+          const txData = await txRes.json()
+          const txs = txData.transactions || txData || []
+          const matchedTxs = txs.filter((tx: any) => tx.matched_invoice_id === invoiceId)
+          setBankMatchCount(matchedTxs.length)
+          if (matchedTxs.length > 0) setBankMatched('existing')
+        }
+      } catch { /* non-blocking */ }
 
       if (data.supplier_name) {
         fetchSupplier(data.supplier_name)
@@ -530,17 +543,21 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
             }`}
           >
             <Landmark className="h-4 w-4" />
-            {bankMatched ? 'Rapproche' : 'Rapprocher'}
+            {bankMatchCount > 0 ? `Rapproche (${bankMatchCount}) +` : 'Rapprocher'}
           </button>
         </div>
       </div>
 
       {/* Bank match badge */}
-      {bankMatched && !showBankMatch && (
+      {bankMatchCount > 0 && !showBankMatch && (
         <div className="flex items-center gap-2 rounded-lg border border-accent-green/30 bg-accent-green/5 px-4 py-2">
           <CheckCircle className="h-4 w-4 text-accent-green" />
-          <span className="text-sm text-accent-green font-medium">Transaction bancaire rapprochee</span>
-          <span className="text-xs text-gray-500 font-mono ml-2">ID: {bankMatched}</span>
+          <span className="text-sm text-accent-green font-medium">
+            {bankMatchCount} transaction(s) bancaire(s) rapprochee(s)
+          </span>
+          <span className="text-xs text-gray-500 ml-2">
+            Cliquez "Rapprocher +" pour en ajouter d&apos;autres
+          </span>
         </div>
       )}
 
@@ -687,6 +704,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                             })
                           }
                           setBankMatched('multi')
+                          setBankMatchCount(prev => prev + selectedBankTxIds.length)
                           setShowBankMatch(false)
                           setSelectedBankTxIds([])
                           setBankTransactions(prev => prev.filter((t: any) => !selectedBankTxIds.includes(t.id)))
