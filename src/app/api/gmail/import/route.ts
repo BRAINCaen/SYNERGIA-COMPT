@@ -1,6 +1,5 @@
 export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
-import { google } from 'googleapis'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb, adminStorage } from '@/lib/firebase/admin'
 
@@ -27,37 +26,33 @@ export async function POST(request: NextRequest) {
     }
 
     const tokenData = tokenDoc.data()!
-    const clientId = process.env.GOOGLE_CLIENT_ID
-    const clientSecret = process.env.GOOGLE_CLIENT_SECRET
-    const appUrl = process.env.NEXT_PUBLIC_APP_URL
 
-    const oauth2Client = new google.auth.OAuth2(
-      clientId,
-      clientSecret,
-      `${appUrl}/api/gmail/callback`
+    // Download attachment via direct fetch (no googleapis needed)
+    const attachRes = await fetch(
+      `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message_id}/attachments/${attachment_id}`,
+      { headers: { Authorization: `Bearer ${tokenData.access_token}` } }
     )
 
-    oauth2Client.setCredentials({
-      access_token: tokenData.access_token,
-      refresh_token: tokenData.refresh_token || undefined,
-      expiry_date: tokenData.expiry_date || undefined,
-    })
+    if (!attachRes.ok) {
+      const err = await attachRes.json().catch(() => ({}))
+      const errMsg = err.error?.message || `Gmail API error ${attachRes.status}`
+      if (errMsg.includes('invalid_grant') || errMsg.includes('Token has been expired')) {
+        return NextResponse.json(
+          { error: 'Session Gmail expiree. Veuillez vous reconnecter.', reconnect: true },
+          { status: 401 }
+        )
+      }
+      return NextResponse.json({ error: errMsg }, { status: 500 })
+    }
 
-    const gmail = google.gmail({ version: 'v1', auth: oauth2Client })
+    const attachData = await attachRes.json()
 
-    // Download attachment
-    const attachment = await gmail.users.messages.attachments.get({
-      userId: 'me',
-      messageId: message_id,
-      id: attachment_id,
-    })
-
-    if (!attachment.data.data) {
+    if (!attachData.data) {
       return NextResponse.json({ error: 'Piece jointe vide' }, { status: 400 })
     }
 
-    // Decode base64url data
-    const pdfBuffer = Buffer.from(attachment.data.data, 'base64url')
+    // Gmail returns base64url encoded data
+    const pdfBuffer = Buffer.from(attachData.data, 'base64url')
 
     // Upload to Firebase Storage
     const storagePath = `invoices/${decoded.uid}/${Date.now()}_${crypto.randomUUID()}.pdf`
@@ -68,7 +63,7 @@ export async function POST(request: NextRequest) {
       metadata: { contentType: 'application/pdf' },
     })
 
-    // Create invoice document in Firestore (same structure as manual upload)
+    // Create invoice document in Firestore
     const invoiceRef = adminDb.collection('invoices').doc()
     const invoiceData = {
       id: invoiceRef.id,
@@ -97,16 +92,6 @@ export async function POST(request: NextRequest) {
     }
 
     await invoiceRef.set(invoiceData)
-
-    // Update tokens if refreshed
-    const credentials = oauth2Client.credentials
-    if (credentials.access_token && credentials.access_token !== tokenData.access_token) {
-      await adminDb.collection('gmailTokens').doc(decoded.uid).update({
-        access_token: credentials.access_token,
-        expiry_date: credentials.expiry_date || null,
-        updated_at: new Date().toISOString(),
-      })
-    }
 
     return NextResponse.json({ success: true, invoice: invoiceData })
   } catch (error) {
