@@ -149,8 +149,10 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     new Intl.NumberFormat('fr-FR', { style: 'currency', currency: 'EUR' }).format(n)
 
   const matchedCount = transactions.filter((t) => t.status === 'matched').length
+  const ignoredCount = transactions.filter((t) => t.status === 'ignored').length
+  const treatedCount = matchedCount + ignoredCount
   const totalCount = transactions.length
-  const matchPercent = totalCount > 0 ? Math.round((matchedCount / totalCount) * 100) : 0
+  const matchPercent = totalCount > 0 ? Math.round((treatedCount / totalCount) * 100) : 0
 
   const filteredTransactions = transactions.filter((t) => {
     // Tab filter
@@ -564,9 +566,13 @@ export default function ReconciliationClient({ statementId }: { statementId: str
         <div className="card">
           <div className="flex items-center justify-between mb-2">
             <p className="text-sm text-gray-400">
-              Rapproches : <span className="font-mono font-medium text-white">{matchedCount}</span> /{' '}
+              Traites : <span className="font-mono font-medium text-white">{treatedCount}</span> /{' '}
               <span className="font-mono">{totalCount}</span>{' '}
               <span className="text-accent-green font-medium">({matchPercent}%)</span>
+              <span className="ml-3 text-xs">
+                (<span className="text-accent-green">{matchedCount} rapproches</span>
+                {ignoredCount > 0 && <span className="text-gray-500"> + {ignoredCount} ignores</span>})
+              </span>
             </p>
           </div>
           <div className="h-2 w-full overflow-hidden rounded-full bg-dark-input">
