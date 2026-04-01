@@ -2,6 +2,7 @@
 
 import { useState, useEffect, useMemo } from 'react'
 import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
+import JSZip from 'jszip'
 import {
   Download,
   FileText,
@@ -14,10 +15,13 @@ import {
   Banknote,
   Users,
   FolderOpen,
+  FileArchive,
+  File,
 } from 'lucide-react'
 import type { Invoice, ExportFormat, RevenueEntry, Payslip } from '@/types'
 
 type DocTab = 'factures' | 'encaissements' | 'personnel' | 'tous'
+type ExportContent = 'file_only' | 'file_and_pdfs' | 'pdfs_only'
 
 interface ExportableDoc {
   id: string
@@ -26,6 +30,8 @@ interface ExportableDoc {
   sublabel: string
   date: string | null
   amount: number | null
+  filePath: string | null
+  fileName: string | null
 }
 
 export default function ExportClient() {
@@ -34,13 +40,14 @@ export default function ExportClient() {
   const [payslips, setPayslips] = useState<Payslip[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
   const [format, setFormat] = useState<ExportFormat>('fec')
+  const [exportContent, setExportContent] = useState<ExportContent>('file_and_pdfs')
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
+  const [exportProgress, setExportProgress] = useState('')
   const [docTab, setDocTab] = useState<DocTab>('tous')
   const { user } = useAuth()
   const authFetch = useAuthFetch()
 
-  // Month selector
   const [selectedMonth, setSelectedMonth] = useState(() => {
     const now = new Date()
     return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}`
@@ -55,19 +62,16 @@ export default function ExportClient() {
   const fetchAll = async () => {
     setLoading(true)
     try {
-      // Sequential to avoid auth token race condition
       const invRes = await authFetch('/api/invoices')
       if (invRes.ok) {
         const data = await invRes.json()
         setInvoices(data.filter((i: Invoice) => i.status === 'validated' || i.status === 'exported'))
       }
-
       const revRes = await authFetch('/api/revenue')
       if (revRes.ok) {
         const data = await revRes.json()
         setRevenue(data)
       }
-
       const payRes = await authFetch('/api/payslips')
       if (payRes.ok) {
         const data = await payRes.json()
@@ -82,7 +86,6 @@ export default function ExportClient() {
   // Build unified doc list
   const allDocs: ExportableDoc[] = useMemo(() => {
     const docs: ExportableDoc[] = []
-
     for (const inv of invoices) {
       docs.push({
         id: `facture:${inv.id}`,
@@ -91,9 +94,10 @@ export default function ExportClient() {
         sublabel: `${inv.invoice_number || '-'} · ${inv.invoice_date ? new Date(inv.invoice_date).toLocaleDateString('fr-FR') : '-'}`,
         date: inv.invoice_date || inv.created_at,
         amount: inv.total_ttc,
+        filePath: inv.file_path,
+        fileName: inv.file_name,
       })
     }
-
     for (const rev of revenue) {
       docs.push({
         id: `encaissement:${rev.id}`,
@@ -102,9 +106,10 @@ export default function ExportClient() {
         sublabel: `${rev.reference || rev.source} · ${rev.date ? new Date(rev.date).toLocaleDateString('fr-FR') : '-'}`,
         date: rev.date,
         amount: rev.amount_ttc,
+        filePath: rev.file_path || null,
+        fileName: rev.file_name || null,
       })
     }
-
     for (const pay of payslips) {
       docs.push({
         id: `payslip:${pay.id}`,
@@ -113,22 +118,18 @@ export default function ExportClient() {
         sublabel: `Bulletin ${pay.month} · Brut: ${formatAmount(pay.gross_salary)}`,
         date: pay.month ? `${pay.month}-01` : pay.created_at,
         amount: pay.net_salary,
+        filePath: pay.file_path || null,
+        fileName: pay.file_name || null,
       })
     }
-
     return docs
   }, [invoices, revenue, payslips])
 
-  // Filter by month
   const filteredByMonth = useMemo(() => {
     if (!selectedMonth) return allDocs
-    return allDocs.filter((doc) => {
-      if (!doc.date) return false
-      return doc.date.startsWith(selectedMonth)
-    })
+    return allDocs.filter((doc) => doc.date?.startsWith(selectedMonth))
   }, [allDocs, selectedMonth])
 
-  // Filter by tab
   const filteredDocs = useMemo(() => {
     if (docTab === 'tous') return filteredByMonth
     if (docTab === 'factures') return filteredByMonth.filter((d) => d.type === 'facture')
@@ -137,19 +138,17 @@ export default function ExportClient() {
     return filteredByMonth
   }, [filteredByMonth, docTab])
 
-  // Available months from docs
   const availableMonths = useMemo(() => {
     const months = new Set<string>()
     for (const doc of allDocs) {
       if (doc.date) {
-        const m = doc.date.slice(0, 7) // YYYY-MM
+        const m = doc.date.slice(0, 7)
         if (/^\d{4}-\d{2}$/.test(m)) months.add(m)
       }
     }
     return Array.from(months).sort().reverse()
   }, [allDocs])
 
-  // Month navigation
   const navigateMonth = (dir: -1 | 1) => {
     const [y, m] = selectedMonth.split('-').map(Number)
     const date = new Date(y, m - 1 + dir, 1)
@@ -180,12 +179,32 @@ export default function ExportClient() {
     }
   }
 
+  // Generate clean filename for a document
+  const makeCleanFilename = (doc: ExportableDoc) => {
+    const dateStr = doc.date ? doc.date.slice(0, 10).replace(/-/g, '') : 'NODATE'
+    const name = (doc.label || 'INCONNU').toUpperCase().replace(/[^A-Z0-9\s]/g, '').replace(/\s+/g, '_').slice(0, 40)
+    const amount = doc.amount != null ? `${doc.amount.toFixed(2).replace('.', ',')}EUR` : ''
+    const prefix = doc.type === 'facture' ? 'FAC' : doc.type === 'encaissement' ? 'ENC' : 'BUL'
+    return `${prefix}_${dateStr}_${name}${amount ? `_${amount}` : ''}.pdf`
+  }
+
+  // Download a PDF from Firebase Storage via proxy
+  const downloadPdf = async (filePath: string): Promise<Blob | null> => {
+    try {
+      const res = await authFetch(`/api/proxy-pdf?path=${encodeURIComponent(filePath)}`)
+      if (res.ok) return await res.blob()
+      return null
+    } catch {
+      return null
+    }
+  }
+
   const handleExport = async () => {
     if (selected.size === 0) return
     setExporting(true)
+    setExportProgress('')
 
     try {
-      // Separate IDs by type
       const invoiceIds: string[] = []
       const revenueIds: string[] = []
       const payslipIds: string[] = []
@@ -197,36 +216,99 @@ export default function ExportClient() {
         else if (type === 'payslip') payslipIds.push(id)
       }
 
-      const res = await authFetch('/api/export', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          invoice_ids: invoiceIds,
-          revenue_ids: revenueIds,
-          payslip_ids: payslipIds,
-          format,
-          month: selectedMonth,
-        }),
-      })
+      const needsFile = exportContent !== 'pdfs_only'
+      const needsPdfs = exportContent !== 'file_only'
 
-      if (res.ok) {
-        const blob = await res.blob()
-        const contentDisposition = res.headers.get('Content-Disposition')
-        const fileName = contentDisposition?.match(/filename="(.+)"/)?.[1] || `export_${selectedMonth}.${format === 'fec' ? 'txt' : format}`
-        const url = URL.createObjectURL(blob)
+      // Step 1: Get the FEC/CSV/JSON file from API
+      let fileBlob: Blob | null = null
+      let fileExt = format === 'fec' ? 'txt' : format
+
+      if (needsFile) {
+        setExportProgress('Generation du fichier comptable...')
+        const res = await authFetch('/api/export', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            invoice_ids: invoiceIds,
+            revenue_ids: revenueIds,
+            payslip_ids: payslipIds,
+            format,
+            month: selectedMonth,
+          }),
+        })
+
+        if (res.ok) {
+          fileBlob = await res.blob()
+        } else {
+          console.error('Export API error:', res.status)
+        }
+      }
+
+      // If only file, just download it directly
+      if (exportContent === 'file_only' && fileBlob) {
+        const url = URL.createObjectURL(fileBlob)
         const a = document.createElement('a')
         a.href = url
-        a.download = fileName
+        a.download = `${format.toUpperCase()}_${selectedMonth}.${fileExt}`
         a.click()
         URL.revokeObjectURL(url)
-        await fetchAll()
-        setSelected(new Set())
+        setExporting(false)
+        setExportProgress('')
+        return
       }
+
+      // Step 2: Download PDFs and create ZIP
+      if (needsPdfs) {
+        const zip = new JSZip()
+        const docsFolder = zip.folder('documents') || zip
+
+        // Add comptable file to ZIP
+        if (fileBlob && needsFile) {
+          zip.file(`${format.toUpperCase()}_${selectedMonth}.${fileExt}`, fileBlob)
+        }
+
+        // Get selected docs that have files
+        const selectedDocs = filteredDocs.filter((d) => selected.has(d.id) && d.filePath)
+        let downloaded = 0
+
+        // Download PDFs in batches of 5
+        for (let i = 0; i < selectedDocs.length; i += 5) {
+          const batch = selectedDocs.slice(i, i + 5)
+          setExportProgress(`Telechargement des PDFs... ${downloaded}/${selectedDocs.length}`)
+
+          const results = await Promise.all(
+            batch.map(async (doc) => {
+              const blob = await downloadPdf(doc.filePath!)
+              return { doc, blob }
+            })
+          )
+
+          for (const { doc, blob } of results) {
+            if (blob) {
+              const cleanName = makeCleanFilename(doc)
+              docsFolder.file(cleanName, blob)
+              downloaded++
+            }
+          }
+        }
+
+        setExportProgress('Creation du ZIP...')
+        const zipBlob = await zip.generateAsync({ type: 'blob' })
+        const url = URL.createObjectURL(zipBlob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = `COMPTA_${selectedMonth}.zip`
+        a.click()
+        URL.revokeObjectURL(url)
+      }
+
+      setSelected(new Set())
     } catch (error) {
       console.error('Export error:', error)
     }
 
     setExporting(false)
+    setExportProgress('')
   }
 
   const tabs: { key: DocTab; label: string; icon: typeof FileText; count: number }[] = [
@@ -242,6 +324,12 @@ export default function ExportClient() {
     { value: 'json', label: 'JSON', desc: 'Format structure pour integration' },
   ]
 
+  const contentOptions: { value: ExportContent; label: string; desc: string; icon: typeof FileText }[] = [
+    { value: 'file_only', label: 'Fichier seul', desc: 'FEC/CSV/JSON uniquement', icon: File },
+    { value: 'file_and_pdfs', label: 'Fichier + PDFs', desc: 'ZIP avec fichier comptable + tous les PDFs renommes', icon: FileArchive },
+    { value: 'pdfs_only', label: 'PDFs seuls', desc: 'ZIP avec tous les PDFs renommes', icon: FileText },
+  ]
+
   const typeColors: Record<string, string> = {
     facture: 'bg-blue-500/20 text-blue-400',
     encaissement: 'bg-green-500/20 text-green-400',
@@ -254,7 +342,6 @@ export default function ExportClient() {
     payslip: 'Bulletin',
   }
 
-  // Stats for current month
   const totalSelected = useMemo(() => {
     let sum = 0
     for (const key of selected) {
@@ -273,10 +360,7 @@ export default function ExportClient() {
 
       {/* Month selector */}
       <div className="flex items-center justify-between rounded-xl border border-dark-border bg-dark-card px-4 py-3">
-        <button
-          onClick={() => navigateMonth(-1)}
-          className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-dark-hover hover:text-white"
-        >
+        <button onClick={() => navigateMonth(-1)} className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-dark-hover hover:text-white">
           <ChevronLeft className="h-5 w-5" />
         </button>
         <div className="text-center">
@@ -285,10 +369,7 @@ export default function ExportClient() {
             {filteredByMonth.length} document{filteredByMonth.length > 1 ? 's' : ''} valide{filteredByMonth.length > 1 ? 's' : ''}
           </p>
         </div>
-        <button
-          onClick={() => navigateMonth(1)}
-          className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-dark-hover hover:text-white"
-        >
+        <button onClick={() => navigateMonth(1)} className="rounded-lg p-2 text-gray-400 transition-colors hover:bg-dark-hover hover:text-white">
           <ChevronRight className="h-5 w-5" />
         </button>
       </div>
@@ -301,9 +382,7 @@ export default function ExportClient() {
               key={m}
               onClick={() => { setSelectedMonth(m); setSelected(new Set()) }}
               className={`rounded-full px-3 py-1 text-xs font-medium transition-colors ${
-                m === selectedMonth
-                  ? 'bg-accent-green text-dark-bg'
-                  : 'bg-dark-card text-gray-400 hover:bg-dark-hover hover:text-white'
+                m === selectedMonth ? 'bg-accent-green text-dark-bg' : 'bg-dark-card text-gray-400 hover:bg-dark-hover hover:text-white'
               }`}
             >
               {new Date(Number(m.slice(0, 4)), Number(m.slice(5, 7)) - 1).toLocaleDateString('fr-FR', { month: 'short', year: '2-digit' })}
@@ -312,17 +391,40 @@ export default function ExportClient() {
         </div>
       )}
 
-      {/* Format */}
-      <div className="card">
-        <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">Format d&apos;export</h2>
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {formats.map((f) => (
-            <button key={f.value} onClick={() => setFormat(f.value)}
-              className={`rounded-lg border-2 p-4 text-left transition-colors ${format === f.value ? 'border-accent-green bg-accent-green/10' : 'border-dark-border hover:border-gray-500'}`}>
-              <p className="font-medium text-gray-200">{f.label}</p>
-              <p className="mt-1 text-xs text-gray-500">{f.desc}</p>
-            </button>
-          ))}
+      {/* Format + Content side by side */}
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        {/* Format */}
+        <div className="card">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">Format d&apos;export</h2>
+          <div className="grid grid-cols-3 gap-2">
+            {formats.map((f) => (
+              <button key={f.value} onClick={() => setFormat(f.value)}
+                className={`rounded-lg border-2 p-3 text-left transition-colors ${format === f.value ? 'border-accent-green bg-accent-green/10' : 'border-dark-border hover:border-gray-500'}`}>
+                <p className="font-medium text-gray-200">{f.label}</p>
+                <p className="mt-1 text-xs text-gray-500">{f.desc}</p>
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Content type */}
+        <div className="card">
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">Contenu</h2>
+          <div className="grid grid-cols-3 gap-2">
+            {contentOptions.map((opt) => {
+              const Icon = opt.icon
+              return (
+                <button key={opt.value} onClick={() => setExportContent(opt.value)}
+                  className={`rounded-lg border-2 p-3 text-left transition-colors ${exportContent === opt.value ? 'border-accent-green bg-accent-green/10' : 'border-dark-border hover:border-gray-500'}`}>
+                  <div className="flex items-center gap-2">
+                    <Icon className="h-4 w-4 text-gray-400" />
+                    <p className="font-medium text-gray-200 text-sm">{opt.label}</p>
+                  </div>
+                  <p className="mt-1 text-xs text-gray-500">{opt.desc}</p>
+                </button>
+              )
+            })}
+          </div>
         </div>
       </div>
 
@@ -335,22 +437,26 @@ export default function ExportClient() {
               key={tab.key}
               onClick={() => { setDocTab(tab.key); setSelected(new Set()) }}
               className={`flex flex-1 items-center justify-center gap-2 rounded-lg px-3 py-2 text-sm font-medium transition-colors ${
-                docTab === tab.key
-                  ? 'bg-accent-green/20 text-accent-green'
-                  : 'text-gray-400 hover:bg-dark-hover hover:text-white'
+                docTab === tab.key ? 'bg-accent-green/20 text-accent-green' : 'text-gray-400 hover:bg-dark-hover hover:text-white'
               }`}
             >
               <Icon className="h-4 w-4" />
               <span className="hidden sm:inline">{tab.label}</span>
               <span className={`ml-1 rounded-full px-2 py-0.5 text-xs ${
                 docTab === tab.key ? 'bg-accent-green/30 text-accent-green' : 'bg-dark-hover text-gray-500'
-              }`}>
-                {tab.count}
-              </span>
+              }`}>{tab.count}</span>
             </button>
           )
         })}
       </div>
+
+      {/* Export progress */}
+      {exporting && exportProgress && (
+        <div className="flex items-center gap-3 rounded-lg border border-accent-green/30 bg-accent-green/10 px-4 py-3">
+          <Loader2 className="h-5 w-5 animate-spin text-accent-green" />
+          <p className="text-sm text-accent-green">{exportProgress}</p>
+        </div>
+      )}
 
       {/* Document list */}
       <div className="card p-0">
