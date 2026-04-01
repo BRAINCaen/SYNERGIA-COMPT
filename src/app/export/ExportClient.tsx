@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { useAuthFetch } from '@/lib/firebase/auth-context'
+import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import {
   Download,
   FileText,
@@ -37,6 +37,7 @@ export default function ExportClient() {
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [docTab, setDocTab] = useState<DocTab>('tous')
+  const { user } = useAuth()
   const authFetch = useAuthFetch()
 
   // Month selector
@@ -46,9 +47,10 @@ export default function ExportClient() {
   })
 
   useEffect(() => {
-    fetchAll()
+    if (user) fetchAll()
+    else setLoading(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [user])
 
   const fetchAll = async () => {
     setLoading(true)
