@@ -453,13 +453,7 @@ export default function InvoiceList() {
           <div className="flex items-center gap-2">
             <select
               value={bulkStatusValue}
-              onChange={(e) => {
-                const val = e.target.value as InvoiceStatus
-                if (val) {
-                  setBulkStatusValue(val)
-                  executeBulkStatusChange(val)
-                }
-              }}
+              onChange={(e) => setBulkStatusValue(e.target.value as InvoiceStatus | '')}
               disabled={actionLoading}
               className="input-field w-auto text-sm py-1.5"
             >
@@ -468,6 +462,20 @@ export default function InvoiceList() {
                 <option key={opt.value} value={opt.value}>{opt.label}</option>
               ))}
             </select>
+            {bulkStatusValue && (
+              <button
+                onClick={() => executeBulkStatusChange(bulkStatusValue as InvoiceStatus)}
+                disabled={actionLoading}
+                className="flex items-center gap-1.5 rounded-lg bg-accent-green px-4 py-1.5 text-sm font-bold text-dark-bg hover:bg-accent-green/90 transition-colors disabled:opacity-50"
+              >
+                {actionLoading ? (
+                  <Loader2 className="h-3.5 w-3.5 animate-spin" />
+                ) : (
+                  <CheckSquare className="h-3.5 w-3.5" />
+                )}
+                Appliquer
+              </button>
+            )}
           </div>
           <div className="flex-1" />
           <button
