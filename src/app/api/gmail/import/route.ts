@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb, adminStorage } from '@/lib/firebase/admin'
+import { getValidGmailToken } from '@/lib/gmail-tokens'
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,29 +20,24 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Get stored tokens
-    const tokenDoc = await adminDb.collection('gmailTokens').doc(decoded.uid).get()
-    if (!tokenDoc.exists) {
-      return NextResponse.json({ error: 'Gmail non connecte' }, { status: 400 })
+    // Get valid token (auto-refresh if expired)
+    const accessToken = await getValidGmailToken(decoded.uid)
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: 'Session Gmail expiree. Veuillez vous reconnecter.', reconnect: true },
+        { status: 401 }
+      )
     }
 
-    const tokenData = tokenDoc.data()!
-
-    // Download attachment via direct fetch (no googleapis needed)
+    // Download attachment via direct fetch
     const attachRes = await fetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages/${message_id}/attachments/${attachment_id}`,
-      { headers: { Authorization: `Bearer ${tokenData.access_token}` } }
+      { headers: { Authorization: `Bearer ${accessToken}` } }
     )
 
     if (!attachRes.ok) {
       const err = await attachRes.json().catch(() => ({}))
       const errMsg = err.error?.message || `Gmail API error ${attachRes.status}`
-      if (errMsg.includes('invalid_grant') || errMsg.includes('Token has been expired')) {
-        return NextResponse.json(
-          { error: 'Session Gmail expiree. Veuillez vous reconnecter.', reconnect: true },
-          { status: 401 }
-        )
-      }
       return NextResponse.json({ error: errMsg }, { status: 500 })
     }
 

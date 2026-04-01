@@ -1,7 +1,7 @@
 export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
-import { adminDb } from '@/lib/firebase/admin'
+import { getValidGmailToken } from '@/lib/gmail-tokens'
 
 // Keywords that indicate an invoice / accounting document
 const INVOICE_KEYWORDS = [
@@ -87,13 +87,14 @@ export async function POST(request: NextRequest) {
     const body = await request.json()
     const { days = 30, sender } = body
 
-    // Get stored tokens
-    const tokenDoc = await adminDb.collection('gmailTokens').doc(decoded.uid).get()
-    if (!tokenDoc.exists) {
-      return NextResponse.json({ error: 'Gmail non connecte' }, { status: 400 })
+    // Get valid token (auto-refresh if expired)
+    const accessToken = await getValidGmailToken(decoded.uid)
+    if (!accessToken) {
+      return NextResponse.json(
+        { error: 'Session Gmail expiree. Veuillez vous reconnecter.', reconnect: true },
+        { status: 401 }
+      )
     }
-
-    const tokenData = tokenDoc.data() as { access_token: string; refresh_token?: string | null; expiry_date?: number | null }
 
     // Build a smarter search query targeting invoices
     let query = `has:attachment filename:pdf newer_than:${days}d`
@@ -108,7 +109,7 @@ export async function POST(request: NextRequest) {
     // Search Gmail
     const listData = await gmailFetch(
       `https://gmail.googleapis.com/gmail/v1/users/me/messages?q=${encodeURIComponent(query)}&maxResults=100`,
-      tokenData.access_token
+      accessToken
     )
 
     const messageIds = listData.messages || []
@@ -123,7 +124,7 @@ export async function POST(request: NextRequest) {
         try {
           const detail = await gmailFetch(
             `https://gmail.googleapis.com/gmail/v1/users/me/messages/${msg.id}?format=full`,
-            tokenData.access_token
+            accessToken
           )
 
           const headers = detail.payload?.headers || []
