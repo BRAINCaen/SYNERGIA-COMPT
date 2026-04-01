@@ -53,25 +53,22 @@ export default function ExportClient() {
   const fetchAll = async () => {
     setLoading(true)
     try {
-      const [invRes, revRes, payRes] = await Promise.all([
-        authFetch('/api/invoices'),
-        authFetch('/api/revenue'),
-        authFetch('/api/payslips'),
-      ])
-
+      // Sequential to avoid auth token race condition
+      const invRes = await authFetch('/api/invoices')
       if (invRes.ok) {
         const data = await invRes.json()
-        // Include validated and exported invoices
         setInvoices(data.filter((i: Invoice) => i.status === 'validated' || i.status === 'exported'))
       }
+
+      const revRes = await authFetch('/api/revenue')
       if (revRes.ok) {
         const data = await revRes.json()
-        // Include all revenue (validated, exported, or no status)
         setRevenue(data)
       }
+
+      const payRes = await authFetch('/api/payslips')
       if (payRes.ok) {
         const data = await payRes.json()
-        // Include all payslips (validated, or no status)
         setPayslips(data)
       }
     } catch (e) {
