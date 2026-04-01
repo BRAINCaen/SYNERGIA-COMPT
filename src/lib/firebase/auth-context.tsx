@@ -50,14 +50,16 @@ export function useAuth() {
 }
 
 export function useAuthFetch() {
-  const { token } = useAuth()
+  const { user } = useAuth()
 
   return async (url: string, options: RequestInit = {}) => {
+    // Always get a fresh token to avoid 401 on expired tokens
+    const freshToken = user ? await user.getIdToken() : null
     return fetch(url, {
       ...options,
       headers: {
         ...options.headers,
-        Authorization: `Bearer ${token}`,
+        Authorization: `Bearer ${freshToken}`,
       },
     })
   }
