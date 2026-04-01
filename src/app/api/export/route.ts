@@ -33,34 +33,66 @@ interface InvoiceWithLines extends InvoiceData {
   lines: LineData[]
 }
 
+interface RevenueData {
+  id: string
+  date: string
+  source: string
+  entity_name: string | null
+  description: string
+  reference: string | null
+  amount_ht: number
+  tva_rate: number
+  tva_amount: number
+  amount_ttc: number
+  pcg_code: string
+  pcg_label: string
+  journal_code: string
+}
+
+interface PayslipData {
+  id: string
+  employee_name: string
+  month: string
+  gross_salary: number
+  net_salary: number
+  employer_charges: number
+  advance_amount: number
+  remaining_salary: number
+}
+
 export async function POST(request: NextRequest) {
   try {
     const decoded = await verifyAuth(request)
     if (!decoded) {
-      return NextResponse.json({ error: 'Non autorisé' }, { status: 401 })
+      return NextResponse.json({ error: 'Non autorise' }, { status: 401 })
     }
 
-    const { invoice_ids, format } = await request.json() as {
+    const body = await request.json()
+    const {
+      invoice_ids = [],
+      revenue_ids = [],
+      payslip_ids = [],
+      format,
+      month,
+    } = body as {
       invoice_ids: string[]
+      revenue_ids: string[]
+      payslip_ids: string[]
       format: 'fec' | 'csv' | 'json'
+      month?: string
     }
 
-    if (!invoice_ids?.length) {
-      return NextResponse.json({ error: 'Aucune facture sélectionnée' }, { status: 400 })
+    const totalCount = invoice_ids.length + revenue_ids.length + payslip_ids.length
+    if (totalCount === 0) {
+      return NextResponse.json({ error: 'Aucun document selectionne' }, { status: 400 })
     }
 
     // Fetch invoices with lines
     const invoices: InvoiceWithLines[] = []
-
     for (const id of invoice_ids) {
       const doc = await adminDb.collection('invoices').doc(id).get()
-      if (!doc.exists || doc.data()!.status !== 'validated') continue
-
-      const linesSnap = await adminDb
-        .collection('invoice_lines')
-        .where('invoice_id', '==', id)
-        .get()
-
+      if (!doc.exists) continue
+      const linesSnap = await adminDb.collection('invoice_lines').where('invoice_id', '==', id).get()
       const invoiceData = doc.data() as InvoiceData
       invoices.push({
         ...invoiceData,
@@ -69,62 +101,97 @@ export async function POST(request: NextRequest) {
       })
     }
 
-    if (invoices.length === 0) {
-      return NextResponse.json({ error: 'Aucune facture validée trouvée' }, { status: 404 })
+    // Fetch revenue entries
+    const revenueEntries: RevenueData[] = []
+    for (const id of revenue_ids) {
+      const doc = await adminDb.collection('revenueEntries').doc(id).get()
+      if (!doc.exists) continue
+      revenueEntries.push({ ...(doc.data() as RevenueData), id: doc.id })
+    }
+
+    // Fetch payslips
+    const payslipEntries: PayslipData[] = []
+    for (const id of payslip_ids) {
+      const doc = await adminDb.collection('payslips').doc(id).get()
+      if (!doc.exists) continue
+      payslipEntries.push({ ...(doc.data() as PayslipData), id: doc.id })
+    }
+
+    if (invoices.length + revenueEntries.length + payslipEntries.length === 0) {
+      return NextResponse.json({ error: 'Aucun document trouve' }, { status: 404 })
     }
 
     let content: string
     let contentType: string
     let fileName: string
+    const dateStr = month || new Date().toISOString().slice(0, 7)
 
     switch (format) {
       case 'fec':
-        content = generateFEC(invoices)
+        content = generateFEC(invoices, revenueEntries, payslipEntries)
         contentType = 'text/plain; charset=utf-8'
-        fileName = `FEC_${new Date().toISOString().slice(0, 10)}.txt`
+        fileName = `FEC_${dateStr}.txt`
         break
       case 'csv':
-        content = generateCSV(invoices)
+        content = generateCSV(invoices, revenueEntries, payslipEntries)
         contentType = 'text/csv; charset=utf-8'
-        fileName = `export_${new Date().toISOString().slice(0, 10)}.csv`
+        fileName = `export_${dateStr}.csv`
         break
       case 'json':
-        content = generateJSON(invoices)
+        content = generateJSON(invoices, revenueEntries, payslipEntries)
         contentType = 'application/json; charset=utf-8'
-        fileName = `export_${new Date().toISOString().slice(0, 10)}.json`
+        fileName = `export_${dateStr}.json`
         break
       default:
-        return NextResponse.json({ error: 'Format non supporté' }, { status: 400 })
+        return NextResponse.json({ error: 'Format non supporte' }, { status: 400 })
     }
 
     // Save export record
     await adminDb.collection('export_history').add({
       user_id: decoded.uid,
       invoice_ids,
+      revenue_ids,
+      payslip_ids,
       format,
+      month: dateStr,
       created_at: new Date().toISOString(),
     })
 
-    // Update invoices status and write audit logs
-    const batch = adminDb.batch()
-    for (const id of invoice_ids) {
-      batch.update(adminDb.collection('invoices').doc(id), {
-        status: 'exported',
-        updated_at: new Date().toISOString(),
-      })
-    }
-    await batch.commit()
+    // Update invoices status
+    if (invoice_ids.length > 0) {
+      const batch = adminDb.batch()
+      for (const id of invoice_ids) {
+        batch.update(adminDb.collection('invoices').doc(id), {
+          status: 'exported',
+          updated_at: new Date().toISOString(),
+        })
+      }
+      await batch.commit()
 
-    // Audit logs for each exported invoice
-    for (const id of invoice_ids) {
-      await writeAuditLog({
-        action: 'export',
-        invoice_id: id,
-        user_id: decoded.uid,
-        before: { status: 'validated' },
-        after: { status: 'exported', format },
-      })
+      for (const id of invoice_ids) {
+        await writeAuditLog({
+          action: 'export',
+          invoice_id: id,
+          user_id: decoded.uid,
+          before: { status: 'validated' },
+          after: { status: 'exported', format },
+        })
+      }
     }
+
+    // Update revenue status
+    if (revenue_ids.length > 0) {
+      const batch = adminDb.batch()
+      for (const id of revenue_ids) {
+        batch.update(adminDb.collection('revenueEntries').doc(id), {
+          status: 'exported',
+          updated_at: new Date().toISOString(),
+        })
+      }
+      await batch.commit()
+    }
+
+    // Update payslip status (no status change needed but could be tracked)
 
     return new NextResponse(content, {
       headers: {
@@ -138,7 +205,9 @@ export async function POST(request: NextRequest) {
   }
 }
 
-function generateFEC(invoices: InvoiceWithLines[]): string {
+// ── FEC Generator ──────────────────────────────
+
+function generateFEC(invoices: InvoiceWithLines[], revenue: RevenueData[], payslips: PayslipData[]): string {
   const headers = [
     'JournalCode', 'JournalLib', 'EcritureNum', 'EcritureDate',
     'CompteNum', 'CompteLib', 'CompAuxNum', 'CompAuxLib',
@@ -149,6 +218,7 @@ function generateFEC(invoices: InvoiceWithLines[]): string {
   const rows: string[] = [headers]
   let ecritureNum = 1
 
+  // ─ Invoices (Achats) ─
   for (const invoice of invoices) {
     const invoiceDate = invoice.invoice_date
       ? new Date(invoice.invoice_date).toISOString().slice(0, 10).replace(/-/g, '')
@@ -162,7 +232,7 @@ function generateFEC(invoices: InvoiceWithLines[]): string {
         String(ecritureNum).padStart(6, '0'), invoiceDate,
         line.pcg_code, line.pcg_label || '', '', '',
         invoice.invoice_number || '', invoiceDate,
-        line.description, formatAmount(line.total_ht), '0,00',
+        line.description, fmtAmt(line.total_ht), '0,00',
         '', '', invoiceDate, '', invoice.currency || 'EUR',
       ].join('|'))
 
@@ -170,10 +240,10 @@ function generateFEC(invoices: InvoiceWithLines[]): string {
         rows.push([
           line.journal_code || 'AC', getJournalLabel(line.journal_code || 'AC'),
           String(ecritureNum).padStart(6, '0'), invoiceDate,
-          getTvaAccount(line.tva_rate), `TVA déductible ${line.tva_rate}%`, '', '',
+          getTvaAccount(line.tva_rate), `TVA deductible ${line.tva_rate}%`, '', '',
           invoice.invoice_number || '', invoiceDate,
           `TVA ${line.tva_rate}% - ${line.description}`,
-          formatAmount(line.tva_amount), '0,00',
+          fmtAmt(line.tva_amount), '0,00',
           '', '', invoiceDate, '', invoice.currency || 'EUR',
         ].join('|'))
       }
@@ -185,8 +255,109 @@ function generateFEC(invoices: InvoiceWithLines[]): string {
         '401000', 'Fournisseurs', invoice.supplier_siret || '', invoice.supplier_name || '',
         invoice.invoice_number || '', invoiceDate,
         `${invoice.supplier_name || 'Fournisseur'} - Facture ${invoice.invoice_number || ''}`,
-        '0,00', formatAmount(invoice.total_ttc),
+        '0,00', fmtAmt(invoice.total_ttc),
         '', '', invoiceDate, '', invoice.currency || 'EUR',
+      ].join('|'))
+    }
+
+    ecritureNum++
+  }
+
+  // ─ Revenue (Encaissements) ─
+  for (const rev of revenue) {
+    const revDate = rev.date
+      ? new Date(rev.date).toISOString().slice(0, 10).replace(/-/g, '')
+      : ''
+
+    // Debit: compte de tresorerie (banque)
+    rows.push([
+      rev.journal_code || 'BQ', getJournalLabel(rev.journal_code || 'BQ'),
+      String(ecritureNum).padStart(6, '0'), revDate,
+      '512000', 'Banque', '', '',
+      rev.reference || '', revDate,
+      `${rev.entity_name || rev.source} - ${rev.description}`,
+      fmtAmt(rev.amount_ttc), '0,00',
+      '', '', revDate, '', 'EUR',
+    ].join('|'))
+
+    // Credit: compte de produit
+    rows.push([
+      rev.journal_code || 'BQ', getJournalLabel(rev.journal_code || 'BQ'),
+      String(ecritureNum).padStart(6, '0'), revDate,
+      rev.pcg_code, rev.pcg_label || '', '', '',
+      rev.reference || '', revDate,
+      `${rev.entity_name || rev.source} - ${rev.description}`,
+      '0,00', fmtAmt(rev.amount_ht),
+      '', '', revDate, '', 'EUR',
+    ].join('|'))
+
+    // TVA collectee
+    if (rev.tva_amount && rev.tva_amount > 0) {
+      rows.push([
+        rev.journal_code || 'BQ', getJournalLabel(rev.journal_code || 'BQ'),
+        String(ecritureNum).padStart(6, '0'), revDate,
+        getTvaCollectedAccount(rev.tva_rate), `TVA collectee ${rev.tva_rate}%`, '', '',
+        rev.reference || '', revDate,
+        `TVA collectee ${rev.tva_rate}% - ${rev.description}`,
+        '0,00', fmtAmt(rev.tva_amount),
+        '', '', revDate, '', 'EUR',
+      ].join('|'))
+    }
+
+    ecritureNum++
+  }
+
+  // ─ Payslips (Personnel) ─
+  for (const pay of payslips) {
+    const payDate = pay.month
+      ? `${pay.month.replace('-', '')}01`
+      : ''
+
+    // Charge: salaire brut
+    rows.push([
+      'OD', 'Operations diverses',
+      String(ecritureNum).padStart(6, '0'), payDate,
+      '641000', 'Remunerations du personnel', '', '',
+      '', payDate,
+      `Salaire ${pay.employee_name} - ${pay.month}`,
+      fmtAmt(pay.gross_salary), '0,00',
+      '', '', payDate, '', 'EUR',
+    ].join('|'))
+
+    // Charge: cotisations patronales
+    if (pay.employer_charges > 0) {
+      rows.push([
+        'OD', 'Operations diverses',
+        String(ecritureNum).padStart(6, '0'), payDate,
+        '645000', 'Charges de securite sociale', '', '',
+        '', payDate,
+        `Cotisations patronales ${pay.employee_name} - ${pay.month}`,
+        fmtAmt(pay.employer_charges), '0,00',
+        '', '', payDate, '', 'EUR',
+      ].join('|'))
+    }
+
+    // Credit: net a payer (personnel)
+    rows.push([
+      'OD', 'Operations diverses',
+      String(ecritureNum).padStart(6, '0'), payDate,
+      '421000', 'Personnel - Remunerations dues', '', '',
+      '', payDate,
+      `Net a payer ${pay.employee_name} - ${pay.month}`,
+      '0,00', fmtAmt(pay.net_salary),
+      '', '', payDate, '', 'EUR',
+    ].join('|'))
+
+    // Credit: organismes sociaux (cotisations)
+    if (pay.employer_charges > 0) {
+      rows.push([
+        'OD', 'Operations diverses',
+        String(ecritureNum).padStart(6, '0'), payDate,
+        '431000', 'Securite sociale', '', '',
+        '', payDate,
+        `Cotisations sociales ${pay.employee_name} - ${pay.month}`,
+        '0,00', fmtAmt(pay.employer_charges),
+        '', '', payDate, '', 'EUR',
       ].join('|'))
     }
 
@@ -196,11 +367,13 @@ function generateFEC(invoices: InvoiceWithLines[]): string {
   return rows.join('\r\n')
 }
 
-function generateCSV(invoices: InvoiceWithLines[]): string {
+// ── CSV Generator ──────────────────────────────
+
+function generateCSV(invoices: InvoiceWithLines[], revenue: RevenueData[], payslips: PayslipData[]): string {
   const headers = [
-    'Date facture', 'N° facture', 'Fournisseur', 'SIRET', 'Description',
-    'Compte PCG', 'Libellé compte', 'Journal', 'Montant HT', 'Taux TVA',
-    'Montant TVA', 'Montant TTC', 'Confiance IA', 'Correction manuelle',
+    'Type', 'Date', 'N° piece', 'Tiers', 'Description',
+    'Compte PCG', 'Libelle compte', 'Journal', 'Montant HT', 'Taux TVA',
+    'Montant TVA', 'Montant TTC',
   ].join(';')
 
   const rows: string[] = [headers]
@@ -208,40 +381,96 @@ function generateCSV(invoices: InvoiceWithLines[]): string {
   for (const invoice of invoices) {
     for (const line of invoice.lines) {
       rows.push([
-        invoice.invoice_date || '', invoice.invoice_number || '',
-        csvEscape(invoice.supplier_name || ''), invoice.supplier_siret || '',
+        'Facture', invoice.invoice_date || '',
+        csvEscape(invoice.invoice_number || ''),
+        csvEscape(invoice.supplier_name || ''),
         csvEscape(line.description), line.pcg_code || '',
         csvEscape(line.pcg_label || ''), line.journal_code || '',
-        formatAmount(line.total_ht), line.tva_rate ? `${line.tva_rate}%` : '',
-        formatAmount(line.tva_amount), formatAmount(line.total_ttc),
-        line.confidence_score ? `${Math.round(line.confidence_score * 100)}%` : '',
-        line.manually_corrected ? 'Oui' : 'Non',
+        fmtAmt(line.total_ht), line.tva_rate ? `${line.tva_rate}%` : '',
+        fmtAmt(line.tva_amount), fmtAmt(line.total_ttc),
       ].join(';'))
     }
+  }
+
+  for (const rev of revenue) {
+    rows.push([
+      'Encaissement', rev.date || '',
+      csvEscape(rev.reference || ''),
+      csvEscape(rev.entity_name || ''),
+      csvEscape(rev.description), rev.pcg_code || '',
+      csvEscape(rev.pcg_label || ''), rev.journal_code || '',
+      fmtAmt(rev.amount_ht), rev.tva_rate ? `${rev.tva_rate}%` : '',
+      fmtAmt(rev.tva_amount), fmtAmt(rev.amount_ttc),
+    ].join(';'))
+  }
+
+  for (const pay of payslips) {
+    rows.push([
+      'Bulletin', `${pay.month}-01`,
+      '', csvEscape(pay.employee_name),
+      `Salaire ${pay.month}`, '641000',
+      'Remunerations du personnel', 'OD',
+      fmtAmt(pay.gross_salary), '',
+      '', fmtAmt(pay.net_salary),
+    ].join(';'))
   }
 
   return '\uFEFF' + rows.join('\r\n')
 }
 
-function generateJSON(invoices: InvoiceWithLines[]): string {
-  const exportData = invoices.map((inv) => ({
-    invoice: {
-      number: inv.invoice_number, date: inv.invoice_date,
-      supplier: inv.supplier_name, siret: inv.supplier_siret,
-      total_ht: inv.total_ht, total_tva: inv.total_tva, total_ttc: inv.total_ttc,
-    },
-    lines: inv.lines.map((line) => ({
-      description: line.description, pcg_code: line.pcg_code,
-      pcg_label: line.pcg_label, journal_code: line.journal_code,
-      total_ht: line.total_ht, tva_rate: line.tva_rate,
-      tva_amount: line.tva_amount, total_ttc: line.total_ttc,
-      confidence: line.confidence_score, manually_corrected: line.manually_corrected,
+// ── JSON Generator ──────────────────────────────
+
+function generateJSON(invoices: InvoiceWithLines[], revenue: RevenueData[], payslips: PayslipData[]): string {
+  const exportData = {
+    exported_at: new Date().toISOString(),
+    invoices: invoices.map((inv) => ({
+      type: 'facture',
+      number: inv.invoice_number,
+      date: inv.invoice_date,
+      supplier: inv.supplier_name,
+      siret: inv.supplier_siret,
+      total_ht: inv.total_ht,
+      total_tva: inv.total_tva,
+      total_ttc: inv.total_ttc,
+      lines: inv.lines.map((line) => ({
+        description: line.description,
+        pcg_code: line.pcg_code,
+        pcg_label: line.pcg_label,
+        journal_code: line.journal_code,
+        total_ht: line.total_ht,
+        tva_rate: line.tva_rate,
+        tva_amount: line.tva_amount,
+        total_ttc: line.total_ttc,
+      })),
     })),
-  }))
-  return JSON.stringify({ exported_at: new Date().toISOString(), invoices: exportData }, null, 2)
+    encaissements: revenue.map((rev) => ({
+      type: 'encaissement',
+      date: rev.date,
+      source: rev.source,
+      entity: rev.entity_name,
+      description: rev.description,
+      reference: rev.reference,
+      pcg_code: rev.pcg_code,
+      amount_ht: rev.amount_ht,
+      tva_rate: rev.tva_rate,
+      tva_amount: rev.tva_amount,
+      amount_ttc: rev.amount_ttc,
+    })),
+    payslips: payslips.map((pay) => ({
+      type: 'bulletin',
+      employee: pay.employee_name,
+      month: pay.month,
+      gross_salary: pay.gross_salary,
+      net_salary: pay.net_salary,
+      employer_charges: pay.employer_charges,
+    })),
+  }
+  return JSON.stringify(exportData, null, 2)
 }
 
-function formatAmount(amount: number | null | undefined): string {
+// ── Helpers ──────────────────────────────
+
+function fmtAmt(amount: number | null | undefined): string {
   if (amount == null) return '0,00'
   return amount.toFixed(2).replace('.', ',')
 }
@@ -255,7 +484,7 @@ function csvEscape(value: string): string {
 
 function getJournalLabel(code: string): string {
   const journals: Record<string, string> = {
-    AC: 'Achats', VE: 'Ventes', BQ: 'Banque', OD: 'Opérations diverses',
+    AC: 'Achats', VE: 'Ventes', BQ: 'Banque', OD: 'Operations diverses',
   }
   return journals[code] || code
 }
@@ -267,4 +496,13 @@ function getTvaAccount(rate: number | null | undefined): string {
   if (rate === 5.5) return '445664'
   if (rate === 2.1) return '445665'
   return '445660'
+}
+
+function getTvaCollectedAccount(rate: number | null | undefined): string {
+  if (!rate) return '445710'
+  if (rate === 20) return '445712'
+  if (rate === 10) return '445713'
+  if (rate === 5.5) return '445714'
+  if (rate === 2.1) return '445715'
+  return '445710'
 }
