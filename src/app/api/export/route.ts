@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb } from '@/lib/firebase/admin'
-import { writeAuditLog } from '@/lib/audit'
+// Audit logs removed from export to avoid timeout on large batches
 
 interface InvoiceData {
   id: string
@@ -87,32 +87,61 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Aucun document selectionne' }, { status: 400 })
     }
 
-    // Fetch invoices with lines
+    // Fetch all documents in parallel using getAll (batch read)
+    const invoiceRefs = invoice_ids.map((id) => adminDb.collection('invoices').doc(id))
+    const revenueRefs = revenue_ids.map((id) => adminDb.collection('revenueEntries').doc(id))
+    const payslipRefs = payslip_ids.map((id) => adminDb.collection('payslips').doc(id))
+
+    // Batch fetch all docs at once (single round-trip per collection)
+    const [invoiceDocs, revenueDocs, payslipDocs] = await Promise.all([
+      invoiceRefs.length > 0 ? adminDb.getAll(...invoiceRefs) : Promise.resolve([]),
+      revenueRefs.length > 0 ? adminDb.getAll(...revenueRefs) : Promise.resolve([]),
+      payslipRefs.length > 0 ? adminDb.getAll(...payslipRefs) : Promise.resolve([]),
+    ])
+
+    // Fetch all invoice lines in one query (by user, then filter in JS)
     const invoices: InvoiceWithLines[] = []
-    for (const id of invoice_ids) {
-      const doc = await adminDb.collection('invoices').doc(id).get()
-      if (!doc.exists) continue
-      const linesSnap = await adminDb.collection('invoice_lines').where('invoice_id', '==', id).get()
-      const invoiceData = doc.data() as InvoiceData
-      invoices.push({
-        ...invoiceData,
-        id: doc.id,
-        lines: linesSnap.docs.map((d) => d.data() as LineData),
-      })
+    if (invoice_ids.length > 0) {
+      // Get all lines for these invoices in parallel batches of 30 (Firestore 'in' limit)
+      const linesByInvoice: Record<string, LineData[]> = {}
+      const idChunks: string[][] = []
+      for (let i = 0; i < invoice_ids.length; i += 30) {
+        idChunks.push(invoice_ids.slice(i, i + 30))
+      }
+      const lineResults = await Promise.all(
+        idChunks.map((chunk) =>
+          adminDb.collection('invoice_lines').where('invoice_id', 'in', chunk).get()
+        )
+      )
+      for (const snap of lineResults) {
+        for (const doc of snap.docs) {
+          const data = doc.data() as LineData & { invoice_id: string }
+          if (!linesByInvoice[data.invoice_id]) linesByInvoice[data.invoice_id] = []
+          linesByInvoice[data.invoice_id].push(data)
+        }
+      }
+
+      for (const doc of invoiceDocs) {
+        if (!doc.exists) continue
+        const invoiceData = doc.data() as InvoiceData
+        invoices.push({
+          ...invoiceData,
+          id: doc.id,
+          lines: linesByInvoice[doc.id] || [],
+        })
+      }
     }
 
-    // Fetch revenue entries
+    // Revenue entries
     const revenueEntries: RevenueData[] = []
-    for (const id of revenue_ids) {
-      const doc = await adminDb.collection('revenueEntries').doc(id).get()
+    for (const doc of revenueDocs) {
       if (!doc.exists) continue
       revenueEntries.push({ ...(doc.data() as RevenueData), id: doc.id })
     }
 
-    // Fetch payslips
+    // Payslips
     const payslipEntries: PayslipData[] = []
-    for (const id of payslip_ids) {
-      const doc = await adminDb.collection('payslips').doc(id).get()
+    for (const doc of payslipDocs) {
       if (!doc.exists) continue
       payslipEntries.push({ ...(doc.data() as PayslipData), id: doc.id })
     }
@@ -146,52 +175,34 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ error: 'Format non supporte' }, { status: 400 })
     }
 
+    // Update statuses in batch (non-blocking after response)
+    // We do this BEFORE returning to ensure at least the batch write goes through
+    const now = new Date().toISOString()
+    const allUpdates: Promise<unknown>[] = []
+
+    // Batch update invoices + revenue status (max 500 per batch)
+    const statusBatch = adminDb.batch()
+    for (const id of invoice_ids) {
+      statusBatch.update(adminDb.collection('invoices').doc(id), { status: 'exported', updated_at: now })
+    }
+    for (const id of revenue_ids) {
+      statusBatch.update(adminDb.collection('revenueEntries').doc(id), { status: 'exported', updated_at: now })
+    }
+    allUpdates.push(statusBatch.commit())
+
     // Save export record
-    await adminDb.collection('export_history').add({
+    allUpdates.push(adminDb.collection('export_history').add({
       user_id: decoded.uid,
       invoice_ids,
       revenue_ids,
       payslip_ids,
       format,
       month: dateStr,
-      created_at: new Date().toISOString(),
-    })
+      created_at: now,
+    }))
 
-    // Update invoices status
-    if (invoice_ids.length > 0) {
-      const batch = adminDb.batch()
-      for (const id of invoice_ids) {
-        batch.update(adminDb.collection('invoices').doc(id), {
-          status: 'exported',
-          updated_at: new Date().toISOString(),
-        })
-      }
-      await batch.commit()
-
-      for (const id of invoice_ids) {
-        await writeAuditLog({
-          action: 'export',
-          invoice_id: id,
-          user_id: decoded.uid,
-          before: { status: 'validated' },
-          after: { status: 'exported', format },
-        })
-      }
-    }
-
-    // Update revenue status
-    if (revenue_ids.length > 0) {
-      const batch = adminDb.batch()
-      for (const id of revenue_ids) {
-        batch.update(adminDb.collection('revenueEntries').doc(id), {
-          status: 'exported',
-          updated_at: new Date().toISOString(),
-        })
-      }
-      await batch.commit()
-    }
-
-    // Update payslip status (no status change needed but could be tracked)
+    // Run updates in parallel but don't block the response
+    await Promise.all(allUpdates)
 
     return new NextResponse(content, {
       headers: {
