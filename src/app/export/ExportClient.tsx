@@ -18,10 +18,18 @@ import {
   FileArchive,
   File,
 } from 'lucide-react'
+import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import type { Invoice, ExportFormat, RevenueEntry, Payslip } from '@/types'
 
 type DocTab = 'factures' | 'encaissements' | 'personnel' | 'tous'
 type ExportContent = 'file_only' | 'file_and_pdfs' | 'pdfs_only'
+
+interface AccountingInfo {
+  pcgCode: string
+  pcgLabel: string
+  journalCode: string
+  lines?: { description: string; pcgCode: string; pcgLabel: string; amount: number }[]
+}
 
 interface ExportableDoc {
   id: string
@@ -32,6 +40,7 @@ interface ExportableDoc {
   amount: number | null
   filePath: string | null
   fileName: string | null
+  accounting: AccountingInfo | null
 }
 
 export default function ExportClient() {
@@ -96,6 +105,7 @@ export default function ExportClient() {
         amount: inv.total_ttc,
         filePath: inv.file_path,
         fileName: inv.file_name,
+        accounting: null, // Lines fetched at annotation time via API
       })
     }
     for (const rev of revenue) {
@@ -108,6 +118,11 @@ export default function ExportClient() {
         amount: rev.amount_ttc,
         filePath: rev.file_path || null,
         fileName: rev.file_name || null,
+        accounting: {
+          pcgCode: rev.pcg_code,
+          pcgLabel: rev.pcg_label,
+          journalCode: rev.journal_code,
+        },
       })
     }
     for (const pay of payslips) {
@@ -120,6 +135,15 @@ export default function ExportClient() {
         amount: pay.net_salary,
         filePath: pay.file_path || null,
         fileName: pay.file_name || null,
+        accounting: {
+          pcgCode: '641000',
+          pcgLabel: 'Remunerations du personnel',
+          journalCode: 'OD',
+          lines: [
+            { description: 'Salaire brut', pcgCode: '641000', pcgLabel: 'Remunerations', amount: pay.gross_salary },
+            ...(pay.employer_charges > 0 ? [{ description: 'Charges patronales', pcgCode: '645000', pcgLabel: 'Charges secu', amount: pay.employer_charges }] : []),
+          ],
+        },
       })
     }
     return docs
@@ -199,6 +223,108 @@ export default function ExportClient() {
     }
   }
 
+  // Download annotated PDF for a facture (uses server-side annotation with full line data)
+  const downloadAnnotatedInvoicePdf = async (invoiceId: string): Promise<Blob | null> => {
+    try {
+      const res = await authFetch(`/api/invoices/${invoiceId}/annotate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({}),
+      })
+      if (res.ok) return await res.blob()
+      // Fallback to raw PDF
+      return null
+    } catch {
+      return null
+    }
+  }
+
+  // Annotate a PDF with accounting stamp (for encaissements/bulletins - client-side)
+  const addAccountingStamp = async (pdfBlob: Blob, doc: ExportableDoc): Promise<Blob> => {
+    if (!doc.accounting) return pdfBlob
+
+    try {
+      const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer())
+      const pdfDoc = await PDFDocument.load(pdfBytes)
+      const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+      const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica)
+      const courier = await pdfDoc.embedFont(StandardFonts.Courier)
+      const pages = pdfDoc.getPages()
+
+      if (pages.length === 0) return pdfBlob
+
+      const firstPage = pages[0]
+      const { width } = firstPage.getSize()
+
+      // Stamp dimensions
+      const stampW = 260
+      const stampH = doc.accounting.lines ? 20 + doc.accounting.lines.length * 14 + 10 : 50
+      const stampX = width - stampW - 15
+      const stampY = 15
+
+      // Dark background
+      firstPage.drawRectangle({
+        x: stampX, y: stampY, width: stampW, height: stampH,
+        color: rgb(13 / 255, 17 / 255, 23 / 255),
+        borderColor: rgb(0, 200 / 255, 150 / 255),
+        borderWidth: 1,
+      })
+
+      // Green accent line
+      firstPage.drawRectangle({
+        x: stampX, y: stampY + stampH - 2, width: stampW, height: 2,
+        color: rgb(0, 200 / 255, 150 / 255),
+      })
+
+      // Title
+      firstPage.drawText('SYNERGIA-COMPT', {
+        x: stampX + 5, y: stampY + stampH - 14,
+        size: 7, font: helveticaBold, color: rgb(0, 200 / 255, 150 / 255),
+      })
+
+      // Date
+      firstPage.drawText(new Date().toLocaleDateString('fr-FR'), {
+        x: stampX + stampW - 55, y: stampY + stampH - 14,
+        size: 6, font: helvetica, color: rgb(0.5, 0.5, 0.5),
+      })
+
+      if (doc.accounting.lines) {
+        let ly = stampY + stampH - 30
+        for (const line of doc.accounting.lines) {
+          firstPage.drawText(line.pcgCode, {
+            x: stampX + 5, y: ly, size: 7, font: courier, color: rgb(0, 200 / 255, 150 / 255),
+          })
+          firstPage.drawText(line.pcgLabel, {
+            x: stampX + 60, y: ly, size: 6, font: helvetica, color: rgb(0.7, 0.7, 0.7),
+          })
+          firstPage.drawText(`${line.amount.toFixed(2)} EUR`, {
+            x: stampX + stampW - 60, y: ly, size: 6, font: courier, color: rgb(1, 1, 1),
+          })
+          ly -= 14
+        }
+      } else {
+        firstPage.drawText(doc.accounting.pcgCode, {
+          x: stampX + 5, y: stampY + stampH - 30,
+          size: 8, font: courier, color: rgb(0, 200 / 255, 150 / 255),
+        })
+        firstPage.drawText(doc.accounting.pcgLabel, {
+          x: stampX + 70, y: stampY + stampH - 30,
+          size: 7, font: helvetica, color: rgb(0.7, 0.7, 0.7),
+        })
+        firstPage.drawText(`Jnl: ${doc.accounting.journalCode}`, {
+          x: stampX + 5, y: stampY + stampH - 42,
+          size: 6, font: helvetica, color: rgb(0.5, 0.5, 0.5),
+        })
+      }
+
+      const annotatedBytes = await pdfDoc.save()
+      return new Blob([annotatedBytes], { type: 'application/pdf' })
+    } catch (e) {
+      console.error('Stamp error:', e)
+      return pdfBlob
+    }
+  }
+
   const handleExport = async () => {
     if (selected.size === 0) return
     setExporting(true)
@@ -271,14 +397,29 @@ export default function ExportClient() {
         const selectedDocs = filteredDocs.filter((d) => selected.has(d.id) && d.filePath)
         let downloaded = 0
 
-        // Download PDFs in batches of 5
-        for (let i = 0; i < selectedDocs.length; i += 5) {
-          const batch = selectedDocs.slice(i, i + 5)
-          setExportProgress(`Telechargement des PDFs... ${downloaded}/${selectedDocs.length}`)
+        // Download and annotate PDFs in batches of 3
+        for (let i = 0; i < selectedDocs.length; i += 3) {
+          const batch = selectedDocs.slice(i, i + 3)
+          setExportProgress(`Annotation et telechargement des PDFs... ${downloaded}/${selectedDocs.length}`)
 
           const results = await Promise.all(
             batch.map(async (doc) => {
-              const blob = await downloadPdf(doc.filePath!)
+              let blob: Blob | null = null
+              const [type, docId] = doc.id.split(':')
+
+              if (type === 'facture') {
+                // Use server-side annotation (has full line data + PCG codes)
+                blob = await downloadAnnotatedInvoicePdf(docId)
+                // Fallback to raw PDF if annotation fails
+                if (!blob) blob = await downloadPdf(doc.filePath!)
+              } else {
+                // Download raw then stamp client-side
+                blob = await downloadPdf(doc.filePath!)
+                if (blob && doc.accounting) {
+                  blob = await addAccountingStamp(blob, doc)
+                }
+              }
+
               return { doc, blob }
             })
           )
