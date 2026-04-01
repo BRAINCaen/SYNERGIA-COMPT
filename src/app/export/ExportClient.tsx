@@ -54,22 +54,25 @@ export default function ExportClient() {
     setLoading(true)
     try {
       const [invRes, revRes, payRes] = await Promise.all([
-        authFetch('/api/invoices?status=validated'),
+        authFetch('/api/invoices'),
         authFetch('/api/revenue'),
         authFetch('/api/payslips'),
       ])
 
       if (invRes.ok) {
         const data = await invRes.json()
-        setInvoices(data)
+        // Include validated and exported invoices
+        setInvoices(data.filter((i: Invoice) => i.status === 'validated' || i.status === 'exported'))
       }
       if (revRes.ok) {
         const data = await revRes.json()
-        setRevenue(data.filter((r: RevenueEntry) => r.status === 'validated'))
+        // Include all revenue (validated, exported, or no status)
+        setRevenue(data)
       }
       if (payRes.ok) {
         const data = await payRes.json()
-        setPayslips(data.filter((p: Payslip) => p.status === 'validated'))
+        // Include all payslips (validated, or no status)
+        setPayslips(data)
       }
     } catch (e) {
       console.error('Fetch error:', e)
