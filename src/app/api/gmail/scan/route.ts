@@ -1,6 +1,7 @@
 export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
+import { adminDb } from '@/lib/firebase/admin'
 import { getValidGmailToken } from '@/lib/gmail-tokens'
 
 // Keywords that indicate an invoice / accounting document
@@ -198,9 +199,32 @@ export async function POST(request: NextRequest) {
 
     const validEmails = emails.filter(Boolean)
 
+    // Get already-imported gmail_message_ids to mark them
+    const importedSnap = await adminDb
+      .collection('invoices')
+      .where('user_id', '==', decoded.uid)
+      .where('source', '==', 'gmail')
+      .get()
+
+    const importedMessageIds = new Set<string>(
+      importedSnap.docs.map((d) => d.data().gmail_message_id).filter(Boolean)
+    )
+
+    // Mark emails as already imported
+    const emailsWithStatus = validEmails.map((e: { messageId: string }) => ({
+      ...e,
+      alreadyImported: importedMessageIds.has(e.messageId),
+    }))
+
+    // Save last scan date
+    await adminDb.collection('gmailTokens').doc(decoded.uid).update({
+      last_scan: new Date().toISOString(),
+    })
+
     return NextResponse.json({
-      emails: validEmails,
-      total: validEmails.length,
+      emails: emailsWithStatus,
+      total: emailsWithStatus.length,
+      already_imported_count: emailsWithStatus.filter((e: { alreadyImported: boolean }) => e.alreadyImported).length,
     })
   } catch (error) {
     console.error('Gmail scan error:', error)

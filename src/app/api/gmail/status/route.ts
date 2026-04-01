@@ -14,13 +14,14 @@ export async function GET(request: NextRequest) {
     const doc = await adminDb.collection('gmailTokens').doc(decoded.uid).get()
 
     if (!doc.exists) {
-      return NextResponse.json({ connected: false, email: null })
+      return NextResponse.json({ connected: false, email: null, last_scan: null })
     }
 
     const data = doc.data()
     return NextResponse.json({
       connected: true,
       email: data?.email || null,
+      last_scan: data?.last_scan || null,
     })
   } catch (error) {
     console.error('Gmail status error:', error)
