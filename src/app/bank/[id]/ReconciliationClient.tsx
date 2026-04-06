@@ -433,13 +433,39 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     setLoadingPreview(true)
     setPreviewUrl(null)
     try {
-      // Fetch invoice to get file_url
-      const res = await authFetch(`/api/invoices/${candidate.id}`)
-      if (res.ok) {
-        const data = await res.json()
-        setPreviewUrl(data.file_url || null)
+      // Try invoice first, then revenue entry, to get file_path
+      let filePath: string | null = null
+
+      if (candidate.type === 'revenue') {
+        // Try revenue entry
+        const revRes = await authFetch(`/api/revenue/${candidate.id}`)
+        if (revRes.ok) {
+          const data = await revRes.json()
+          filePath = data.file_path || null
+        }
       }
-    } catch { /* */ }
+
+      if (!filePath) {
+        // Try invoice
+        const invRes = await authFetch(`/api/invoices/${candidate.id}`)
+        if (invRes.ok) {
+          const data = await invRes.json()
+          filePath = data.file_path || null
+        }
+      }
+
+      if (filePath) {
+        // Use proxy-pdf to avoid CORS issues
+        const proxyRes = await authFetch(`/api/proxy-pdf?path=${encodeURIComponent(filePath)}`)
+        if (proxyRes.ok) {
+          const blob = await proxyRes.blob()
+          const url = URL.createObjectURL(blob)
+          setPreviewUrl(url)
+        }
+      }
+    } catch (e) {
+      console.error('Preview error:', e)
+    }
     setLoadingPreview(false)
   }
 
@@ -1203,7 +1229,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                   Valider le rapprochement
                 </button>
                 <button
-                  onClick={() => { setPreviewCandidate(null); setPreviewUrl(null) }}
+                  onClick={() => { if (previewUrl) URL.revokeObjectURL(previewUrl); setPreviewCandidate(null); setPreviewUrl(null) }}
                   className="rounded-lg p-1.5 text-gray-400 hover:bg-dark-hover hover:text-gray-200"
                 >
                   <X className="h-5 w-5" />
@@ -1218,7 +1244,11 @@ export default function ReconciliationClient({ statementId }: { statementId: str
               ) : previewUrl ? (
                 <iframe src={previewUrl} className="h-full w-full rounded-lg border border-dark-border" />
               ) : (
-                <p className="flex h-full items-center justify-center text-gray-500">Impossible de charger le PDF</p>
+                <div className="flex h-full flex-col items-center justify-center text-gray-500">
+                  <FileText className="mb-3 h-12 w-12 text-gray-600" />
+                  <p className="text-sm">Aucun fichier associe a ce document</p>
+                  <p className="mt-1 text-xs text-gray-600">Le document a peut-etre ete cree manuellement sans PDF</p>
+                </div>
               )}
             </div>
           </div>
