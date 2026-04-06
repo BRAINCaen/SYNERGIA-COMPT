@@ -141,6 +141,24 @@ export default function InvoiceList() {
     fetchInvoices()
   }, [statusFilter])
 
+  // Auto-rename all invoices on first load (non-blocking)
+  useEffect(() => {
+    const autoRename = async () => {
+      try {
+        const res = await authFetch('/api/invoices/batch-rename', { method: 'POST' })
+        if (res.ok) {
+          const data = await res.json()
+          if (data.renamed > 0) {
+            // Reload to show new names
+            fetchInvoices()
+          }
+        }
+      } catch { /* non-blocking */ }
+    }
+    autoRename()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // Load matched IDs separately (non-blocking)
   useEffect(() => {
     const loadMatched = async () => {

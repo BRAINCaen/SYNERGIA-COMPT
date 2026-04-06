@@ -182,16 +182,20 @@ export default function InvoiceUploader() {
     const revenueSource = extraction.revenue_source || null
     const isRevenue = docType === 'revenue'
 
-    // Rename: PREFIX-SUPPLIER-AMOUNT€-YYYY-MM.ext
+    // Rename: SUPPLIER-AMOUNT_EUR-YYYYMMDD-NUMFACTURE.ext
     const supplierName = (extraction.supplier?.name || '').toUpperCase().trim()
+      .replace(/[^A-Z0-9\sÀ-Ü]/g, '').replace(/\s+/g, '_').slice(0, 40)
     const totalTTC = extraction.totals?.total_ttc
+    const invoiceNum = (extraction.invoice?.number || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 30)
     const originalExt = files[index]?.file?.name?.split('.').pop() || 'pdf'
     let newFileName = files[index]?.file?.name || 'facture.pdf'
-    if (supplierName && totalTTC != null) {
-      const amountStr = totalTTC.toFixed(2).replace('.', ',')
-      const dateStr = extractedDate ? extractedDate.substring(0, 7) : new Date().toISOString().substring(0, 7)
-      const prefix = isRevenue ? 'RECETTE' : ''
-      newFileName = prefix ? `${prefix}-${supplierName}-${amountStr}\u20AC-${dateStr}.${originalExt}` : `${supplierName}-${amountStr}\u20AC-${dateStr}.${originalExt}`
+    if (supplierName || totalTTC != null) {
+      const parts: string[] = []
+      if (supplierName) parts.push(supplierName)
+      if (totalTTC != null) parts.push(`${totalTTC.toFixed(2).replace('.', ',')}EUR`)
+      if (extractedDate) parts.push(extractedDate.slice(0, 10).replace(/-/g, ''))
+      if (invoiceNum) parts.push(invoiceNum)
+      newFileName = `${parts.join('-')}.${originalExt}`
     }
 
     await authFetch(`/api/invoices/${invoice.id}`, {
