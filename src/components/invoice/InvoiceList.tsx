@@ -36,6 +36,8 @@ export default function InvoiceList() {
   const [matchedInvoiceIds, setMatchedInvoiceIds] = useState<Set<string>>(new Set())
   const [rescanningIds, setRescanningIds] = useState<Set<string>>(new Set())
   const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false)
+  const [renaming, setRenaming] = useState(false)
+  const [renameResult, setRenameResult] = useState<string | null>(null)
   const authFetch = useAuthFetch()
 
   const rescanInvoice = async (invoiceId: string) => {
@@ -140,24 +142,6 @@ export default function InvoiceList() {
   useEffect(() => {
     fetchInvoices()
   }, [statusFilter])
-
-  // Auto-rename all invoices on first load (non-blocking)
-  useEffect(() => {
-    const autoRename = async () => {
-      try {
-        const res = await authFetch('/api/invoices/batch-rename', { method: 'POST' })
-        if (res.ok) {
-          const data = await res.json()
-          if (data.renamed > 0) {
-            // Reload to show new names
-            fetchInvoices()
-          }
-        }
-      } catch { /* non-blocking */ }
-    }
-    autoRename()
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
 
   // Load matched IDs separately (non-blocking)
   useEffect(() => {
@@ -449,6 +433,30 @@ export default function InvoiceList() {
             <span className="text-xs text-gray-400">Non rapprochees</span>
             <Landmark className="h-3.5 w-3.5 text-accent-orange" />
           </label>
+          <button
+            onClick={async () => {
+              setRenaming(true)
+              setRenameResult(null)
+              try {
+                const res = await authFetch('/api/invoices/batch-rename', { method: 'POST' })
+                if (res.ok) {
+                  const data = await res.json()
+                  setRenameResult(`${data.renamed} facture${data.renamed > 1 ? 's' : ''} renommee${data.renamed > 1 ? 's' : ''}`)
+                  if (data.renamed > 0) fetchInvoices()
+                }
+              } catch { setRenameResult('Erreur') }
+              setRenaming(false)
+            }}
+            disabled={renaming}
+            className="flex items-center gap-1.5 rounded-lg border border-dark-border px-3 py-1.5 text-xs text-gray-400 hover:border-accent-green/50 hover:text-accent-green transition-colors disabled:opacity-50"
+            title="Renommer toutes les factures au format FOURNISSEUR-MONTANT-DATE"
+          >
+            {renaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Renommer tout
+          </button>
+          {renameResult && (
+            <span className="text-xs text-accent-green">{renameResult}</span>
+          )}
         </div>
       </div>
 
