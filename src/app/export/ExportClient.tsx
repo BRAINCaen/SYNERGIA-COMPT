@@ -318,7 +318,7 @@ export default function ExportClient() {
       }
 
       const annotatedBytes = await pdfDoc.save()
-      return new Blob([annotatedBytes], { type: 'application/pdf' })
+      return new Blob([annotatedBytes.buffer as ArrayBuffer], { type: 'application/pdf' })
     } catch (e) {
       console.error('Stamp error:', e)
       return pdfBlob
