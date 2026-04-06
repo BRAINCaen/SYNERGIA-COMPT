@@ -38,6 +38,8 @@ export default function InvoiceList() {
   const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [renameResult, setRenameResult] = useState<string | null>(null)
+  const [batchScanning, setBatchScanning] = useState(false)
+  const [scanProgress, setScanProgress] = useState('')
   const { user } = useAuth()
   const authFetch = useAuthFetch()
 
@@ -463,8 +465,54 @@ export default function InvoiceList() {
             {renaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
             Renommer tout
           </button>
+          <button
+            onClick={async () => {
+              setBatchScanning(true)
+              setScanProgress('Demarrage...')
+              const pendingInvoices = invoices.filter((inv) =>
+                (inv.status === 'pending' || inv.status === 'error') && !inv.supplier_name
+              )
+              if (pendingInvoices.length === 0) {
+                setScanProgress('Aucune facture en attente a scanner')
+                setBatchScanning(false)
+                return
+              }
+              let done = 0
+              let errors = 0
+              for (const inv of pendingInvoices) {
+                setScanProgress(`Scan ${done + 1}/${pendingInvoices.length}...`)
+                try {
+                  await rescanInvoice(inv.id)
+                  done++
+                } catch {
+                  errors++
+                }
+                // Delay to avoid rate limits
+                if (done < pendingInvoices.length) {
+                  await new Promise((r) => setTimeout(r, 3000))
+                }
+              }
+              setScanProgress(`${done} scannee(s)${errors > 0 ? `, ${errors} erreur(s)` : ''}`)
+              fetchInvoices()
+              // Auto-rename after scan
+              try {
+                await authFetch('/api/invoices/batch-rename', { method: 'POST' })
+                fetchInvoices()
+              } catch {}
+              setBatchScanning(false)
+            }}
+            disabled={batchScanning || renaming}
+            className="flex items-center gap-1.5 rounded-lg border border-accent-orange/50 px-3 py-1.5 text-xs text-accent-orange hover:bg-accent-orange/10 transition-colors disabled:opacity-50"
+            title="Scanner toutes les factures en attente avec l'IA"
+          >
+            {batchScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
+            Scanner en attente
+          </button>
           {renameResult && (
             <span className="text-xs text-accent-green">{renameResult}</span>
+          )}
+          {scanProgress && (
+            <span className="text-xs text-accent-orange">{scanProgress}</span>
           )}
         </div>
       </div>
