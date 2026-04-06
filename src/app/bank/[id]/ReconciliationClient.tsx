@@ -620,7 +620,28 @@ export default function ReconciliationClient({ statementId }: { statementId: str
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-dark-border text-left">
-                <th className="w-8 px-2 py-3"></th>
+                <th className="w-8 px-2 py-3">
+                  {(() => {
+                    const selectableIds = filteredTransactions.filter(t => t.status === 'unmatched').map(t => t.id)
+                    if (selectableIds.length === 0) return null
+                    const allChecked = selectableIds.length > 0 && selectableIds.every(id => selectedTxIds.includes(id))
+                    return (
+                      <input
+                        type="checkbox"
+                        checked={allChecked}
+                        onChange={() => {
+                          if (allChecked) {
+                            setSelectedTxIds(prev => prev.filter(id => !selectableIds.includes(id)))
+                          } else {
+                            setSelectedTxIds(prev => [...new Set([...prev, ...selectableIds])])
+                          }
+                        }}
+                        className="h-4 w-4 rounded border-dark-border bg-dark-input text-accent-green focus:ring-accent-green/50 cursor-pointer"
+                        title={`Tout ${allChecked ? 'decocher' : 'cocher'} (${selectableIds.length})`}
+                      />
+                    )
+                  })()}
+                </th>
                 <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Date
                 </th>
