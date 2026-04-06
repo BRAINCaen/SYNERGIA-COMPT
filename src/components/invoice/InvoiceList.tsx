@@ -104,12 +104,10 @@ export default function InvoiceList() {
 
       if (classifyRes.ok) {
         const classifyData = await classifyRes.json()
-        // Save lines
         if (classifyData.classifications) {
           const lines = (extraction.lines || []).map((line: any, i: number) => {
             const c = classifyData.classifications?.find((cl: any) => cl.line_index === i)
             return {
-              invoice_id: invoiceId,
               description: line.description || '',
               quantity: line.quantity || 1,
               unit_price: line.unit_price || line.total_ht,
@@ -128,6 +126,15 @@ export default function InvoiceList() {
               classification_method: c?.classification_method || 'ai',
             }
           })
+
+          // Save lines to Firestore
+          if (lines.length > 0) {
+            await authFetch(`/api/invoices/${invoiceId}/lines`, {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ lines }),
+            })
+          }
 
           await authFetch(`/api/invoices/${invoiceId}`, {
             method: 'PATCH',
