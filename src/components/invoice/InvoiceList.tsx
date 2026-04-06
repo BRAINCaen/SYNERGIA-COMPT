@@ -444,8 +444,14 @@ export default function InvoiceList() {
                 const res = await authFetch('/api/invoices/batch-rename', { method: 'POST' })
                 if (res.ok) {
                   const data = await res.json()
-                  setRenameResult(`${data.renamed} facture${data.renamed > 1 ? 's' : ''} renommee${data.renamed > 1 ? 's' : ''}`)
+                  const msg = data.renamed > 0
+                    ? `${data.renamed} renommee(s) sur ${data.total}`
+                    : `0 renommee (${data.noData || 0} sans donnees, ${data.skipped || 0} deja ok)`
+                  setRenameResult(msg)
                   if (data.renamed > 0) fetchInvoices()
+                } else {
+                  const err = await res.json().catch(() => ({ error: res.status }))
+                  setRenameResult(`Erreur: ${err.error}`)
                 }
               } catch { setRenameResult('Erreur') }
               setRenaming(false)
