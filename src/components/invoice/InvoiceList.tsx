@@ -79,6 +79,8 @@ export default function InvoiceList() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           file_name: newFileName,
+          document_type: extraction.document_type || 'expense',
+          is_credit_note: extraction.is_credit_note || false,
           supplier_name: extraction.supplier?.name,
           supplier_siret: extraction.supplier?.siret || null,
           invoice_number: extraction.invoice?.number || null,

@@ -24,7 +24,7 @@ export async function GET(request: NextRequest) {
     let results: any[] = []
 
     if (txType !== 'credit') {
-      // Load invoices (expenses) for DEBIT transactions
+      // Load invoices (expenses, NOT credit notes) for DEBIT transactions
       const invSnap = await adminDb
         .collection('invoices')
         .where('user_id', '==', decoded.uid)
@@ -33,8 +33,9 @@ export async function GET(request: NextRequest) {
       const invoices = invSnap.docs
         .map(doc => {
           const d = doc.data()
-          // Only expense documents for debits
+          // Only expense documents for debits (exclude revenue and credit notes)
           if (txType === 'debit' && d.document_type === 'revenue') return null
+          if (txType === 'debit' && d.is_credit_note === true) return null
           return {
             id: doc.id,
             source: 'invoice' as const,
@@ -46,6 +47,7 @@ export async function GET(request: NextRequest) {
             total_ttc: d.total_ttc || 0,
             status: d.status || '',
             document_type: d.document_type || 'expense',
+            is_credit_note: d.is_credit_note || false,
             type: 'invoice' as const,
           }
         })
@@ -109,33 +111,38 @@ export async function GET(request: NextRequest) {
 
       results.push(...revenues)
 
-      // Also include invoices marked as revenue (factures de prestation)
+      // Also include invoices marked as revenue OR credit notes (avoirs/remboursements)
       if (txType === 'credit') {
         const invSnap = await adminDb
           .collection('invoices')
           .where('user_id', '==', decoded.uid)
           .get()
 
-        const revenueInvoices = invSnap.docs
-          .filter(doc => doc.data().document_type === 'revenue')
+        const creditInvoices = invSnap.docs
+          .filter(doc => {
+            const d = doc.data()
+            return d.document_type === 'revenue' || d.is_credit_note === true
+          })
           .map(doc => {
             const d = doc.data()
+            const isCreditNote = d.is_credit_note === true
             return {
               id: doc.id,
               source: 'invoice' as const,
               file_name: d.file_name || '',
-              name: d.supplier_name || d.file_name || 'Sans nom',
+              name: `${isCreditNote ? '[AVOIR] ' : ''}${d.supplier_name || d.file_name || 'Sans nom'}`,
               invoice_number: d.invoice_number || '',
               date: d.invoice_date || '',
               total_ht: d.total_ht || 0,
               total_ttc: d.total_ttc || 0,
               status: d.status || '',
-              document_type: 'revenue',
+              document_type: isCreditNote ? 'credit_note' : 'revenue',
+              is_credit_note: isCreditNote,
               type: 'invoice' as const,
             }
           })
 
-        results.push(...revenueInvoices)
+        results.push(...creditInvoices)
       }
     }
 

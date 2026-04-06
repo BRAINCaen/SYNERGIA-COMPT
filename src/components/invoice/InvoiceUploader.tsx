@@ -205,6 +205,7 @@ export default function InvoiceUploader() {
         file_name: newFileName,
         document_type: docType,
         revenue_source: revenueSource,
+        is_credit_note: extraction.is_credit_note || false,
         supplier_name: extraction.supplier?.name,
         supplier_siret: extraction.supplier?.siret,
         invoice_number: extraction.invoice?.number,

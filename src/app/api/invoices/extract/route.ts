@@ -24,11 +24,12 @@ Pour les recettes, identifie aussi la source : "tpe_virtuel", "virement", "tpe_s
 
 Extrais :
 1. **Type** : "expense" ou "revenue"
-2. **Source recette** (si revenue) : tpe_virtuel, virement, tpe_sur_place, cheque, ancv, especes, ou null
-3. **Émetteur/Fournisseur** : nom, adresse, SIRET, TVA intra, téléphone, email
-4. **Document** : numéro, date (YYYY-MM-DD), date d'échéance, conditions de paiement
-5. **Lignes** : description, quantité, prix unitaire HT, total HT, taux TVA (%), montant TVA, total TTC
-6. **Totaux** : total HT, total TVA, total TTC, détail TVA par taux
+2. **Avoir/Remboursement** : true si c'est un AVOIR, un remboursement, un credit note, ou une note de crédit. Un avoir/remboursement est une facture NEGATIVE = un fournisseur nous rembourse de l'argent → ça apparait comme un CREDIT sur le relevé bancaire. Mets is_credit_note: true dans ce cas.
+3. **Source recette** (si revenue) : tpe_virtuel, virement, tpe_sur_place, cheque, ancv, especes, ou null
+4. **Émetteur/Fournisseur** : nom, adresse, SIRET, TVA intra, téléphone, email
+5. **Document** : numéro, date (YYYY-MM-DD), date d'échéance, conditions de paiement
+6. **Lignes** : description, quantité, prix unitaire HT, total HT, taux TVA (%), montant TVA, total TTC
+7. **Totaux** : total HT, total TVA, total TTC, détail TVA par taux
 
 RÈGLES STRICTES :
 - Montants = nombres (jamais de symboles € ou espaces)
@@ -48,6 +49,7 @@ MULTI-PAGES (TRÈS IMPORTANT) :
 Réponds UNIQUEMENT avec le JSON suivant (pas de texte autour) :
 {
   "document_type": "expense | revenue",
+  "is_credit_note": false,
   "revenue_source": "tpe_virtuel | virement | tpe_sur_place | cheque | ancv | especes | null",
   "supplier": {
     "name": "string",
