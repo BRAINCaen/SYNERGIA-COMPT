@@ -581,6 +581,38 @@ export default function InvoiceList() {
           </span>
           <div className="mx-2 h-5 w-px bg-primary-200" />
           <button
+            onClick={async () => {
+              const ids = Array.from(selectedIds)
+              setBatchScanning(true)
+              setScanProgress('Demarrage rescan...')
+              let done = 0
+              let errors = 0
+              for (const id of ids) {
+                setScanProgress(`Rescan ${done + 1}/${ids.length}...`)
+                try {
+                  await rescanInvoice(id)
+                  done++
+                } catch { errors++ }
+                if (done + errors < ids.length) {
+                  await new Promise((r) => setTimeout(r, 3000))
+                }
+              }
+              setScanProgress(`${done} rescannee(s)${errors > 0 ? `, ${errors} erreur(s)` : ''}`)
+              // Auto-rename after rescan
+              try {
+                await authFetch('/api/invoices/batch-rename', { method: 'POST' })
+              } catch {}
+              fetchInvoices()
+              setSelectedIds(new Set())
+              setBatchScanning(false)
+            }}
+            disabled={batchScanning || actionLoading}
+            className="flex items-center gap-1.5 rounded-lg bg-accent-orange px-3 py-1.5 text-sm font-medium text-dark-bg hover:bg-accent-orange/90 transition-colors disabled:opacity-50"
+          >
+            {batchScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Rescanner ({selectedIds.size})
+          </button>
+          <button
             onClick={() => confirmDelete()}
             disabled={actionLoading}
             className="flex items-center gap-1.5 rounded-lg bg-red-600 px-3 py-1.5 text-sm font-medium text-white hover:bg-red-700 transition-colors disabled:opacity-50"
