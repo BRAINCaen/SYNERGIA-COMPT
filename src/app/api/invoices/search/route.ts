@@ -43,8 +43,11 @@ export async function GET(request: NextRequest) {
             name: d.supplier_name || d.file_name || 'Sans nom',
             invoice_number: d.invoice_number || '',
             date: d.invoice_date || '',
+            currency: d.currency || 'EUR',
             total_ht: d.total_ht || 0,
             total_ttc: d.total_ttc || 0,
+            total_ttc_eur: d.total_ttc_eur || null,
+            exchange_rate: d.exchange_rate || null,
             status: d.status || '',
             document_type: d.document_type || 'expense',
             is_credit_note: d.is_credit_note || false,
@@ -159,10 +162,13 @@ export async function GET(request: NextRequest) {
     }
 
     // If amount provided, sort by closest amount match
+    // Use total_ttc_eur (converted) if available, otherwise total_ttc
     if (amount != null) {
       results.sort((a, b) => {
-        const diffA = Math.abs((a.total_ttc || 0) - amount)
-        const diffB = Math.abs((b.total_ttc || 0) - amount)
+        const amtA = a.total_ttc_eur || a.total_ttc || 0
+        const amtB = b.total_ttc_eur || b.total_ttc || 0
+        const diffA = Math.abs(amtA - amount)
+        const diffB = Math.abs(amtB - amount)
         return diffA - diffB
       })
     }
@@ -171,18 +177,21 @@ export async function GET(request: NextRequest) {
     results = results.slice(0, 50)
 
     // Map to unified format for the frontend
+    // Use EUR amount for matching when available (foreign currency invoices)
     const invoices = results.map(r => ({
       id: r.id,
       file_name: r.file_name,
       supplier_name: r.name,
       invoice_number: r.invoice_number,
       invoice_date: r.date,
+      currency: r.currency || 'EUR',
       total_ht: r.total_ht,
-      total_ttc: r.total_ttc,
+      total_ttc: r.total_ttc_eur || r.total_ttc, // EUR amount for matching
+      total_ttc_original: r.total_ttc_eur ? r.total_ttc : null, // Original if converted
+      exchange_rate: r.exchange_rate || null,
       status: r.status,
       document_type: r.document_type,
-      type: r.type, // 'invoice', 'revenue', or 'payslip'
-      // Payslip-specific amounts for matching
+      type: r.type,
       advance_amount: r.advance_amount || null,
       remaining_salary: r.remaining_salary || null,
     }))

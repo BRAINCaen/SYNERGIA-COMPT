@@ -63,7 +63,8 @@ Réponds UNIQUEMENT avec le JSON suivant (pas de texte autour) :
     "number": "string",
     "date": "YYYY-MM-DD",
     "due_date": "YYYY-MM-DD | null",
-    "payment_terms": "string | null"
+    "payment_terms": "string | null",
+    "currency": "EUR | USD | GBP | ..."
   },
   "lines": [
     {

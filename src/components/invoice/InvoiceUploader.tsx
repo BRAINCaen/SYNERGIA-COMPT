@@ -3,6 +3,7 @@
 import { useState, useCallback } from 'react'
 import { useAuthFetch } from '@/lib/firebase/auth-context'
 import { Upload, X, FileText, Image, Loader2, CheckCircle, AlertCircle, MessageCircleQuestion, Send, Zap, Copy } from 'lucide-react'
+import { convertToEur } from '@/lib/currency'
 
 interface AnswerChoice {
   label: string
@@ -198,6 +199,23 @@ export default function InvoiceUploader() {
       newFileName = `${parts.join('-')}.${originalExt}`
     }
 
+    // Currency conversion if not EUR
+    const currency = extraction.invoice?.currency || 'EUR'
+    let totalHtEur = extraction.totals?.total_ht || null
+    let totalTtcEur = extraction.totals?.total_ttc || null
+    let exchangeRate = null
+
+    if (currency && currency !== 'EUR' && extraction.totals?.total_ttc && extractedDate) {
+      const converted = await convertToEur(extraction.totals.total_ttc, currency, extractedDate)
+      if (converted) {
+        totalTtcEur = converted.amountEur
+        exchangeRate = converted.rate
+        if (extraction.totals?.total_ht) {
+          totalHtEur = Math.round(extraction.totals.total_ht * converted.rate * 100) / 100
+        }
+      }
+    }
+
     await authFetch(`/api/invoices/${invoice.id}`, {
       method: 'PATCH',
       headers: { 'Content-Type': 'application/json' },
@@ -211,9 +229,13 @@ export default function InvoiceUploader() {
         invoice_number: extraction.invoice?.number,
         invoice_date: extraction.invoice?.date,
         due_date: extraction.invoice?.due_date,
+        currency,
         total_ht: extraction.totals?.total_ht,
         total_tva: extraction.totals?.total_tva,
         total_ttc: extraction.totals?.total_ttc,
+        total_ht_eur: totalHtEur,
+        total_ttc_eur: totalTtcEur,
+        exchange_rate: exchangeRate,
         raw_extraction: extraction,
         status: 'processing',
       }),

@@ -3,6 +3,7 @@
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
 import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
+import { convertToEur } from '@/lib/currency'
 import { StatusBadge } from '@/components/ui/Badge'
 import { FileText, Search, Filter, ChevronDown, ChevronRight, Calendar, Trash2, X, CheckSquare, Landmark, RefreshCw, Loader2 } from 'lucide-react'
 import type { Invoice, InvoiceStatus } from '@/types'
@@ -74,6 +75,20 @@ export default function InvoiceList() {
         ? `${extraction.supplier.name.toUpperCase()}-${extraction.totals.total_ttc.toFixed(2).replace('.', ',')}€.pdf`
         : invData.file_name
 
+      // Currency conversion if not EUR
+      const currency = extraction.invoice?.currency || 'EUR'
+      let totalTtcEur = null
+      let totalHtEur = null
+      let exchangeRate = null
+      if (currency !== 'EUR' && extraction.totals?.total_ttc && extraction.invoice?.date) {
+        const converted = await convertToEur(extraction.totals.total_ttc, currency, extraction.invoice.date)
+        if (converted) {
+          totalTtcEur = converted.amountEur
+          exchangeRate = converted.rate
+          if (extraction.totals?.total_ht) totalHtEur = Math.round(extraction.totals.total_ht * converted.rate * 100) / 100
+        }
+      }
+
       await authFetch(`/api/invoices/${invoiceId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -86,9 +101,13 @@ export default function InvoiceList() {
           invoice_number: extraction.invoice?.number || null,
           invoice_date: extraction.invoice?.date || null,
           due_date: extraction.invoice?.due_date || null,
+          currency,
           total_ht: extraction.totals?.total_ht || null,
           total_tva: extraction.totals?.total_tva || null,
           total_ttc: extraction.totals?.total_ttc || null,
+          total_ht_eur: totalHtEur,
+          total_ttc_eur: totalTtcEur,
+          exchange_rate: exchangeRate,
           raw_extraction: extraction,
           status: 'processing',
         }),
