@@ -356,7 +356,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
       .then(res => res.ok ? res.json() : { invoices: [] })
       .then(data => {
         const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
-          id: inv.id, type: inv.document_type === 'revenue' ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
+          id: inv.id, type: (inv.document_type === 'revenue' || inv.document_type === 'credit_note') ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
           name: inv.supplier_name || inv.file_name || 'Sans nom',
           amount: inv.total_ttc || 0, date: inv.invoice_date || '', file_name: inv.file_name || '',
         }))
@@ -383,7 +383,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
         const data = await res.json()
         const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
           id: inv.id,
-          type: inv.document_type === 'revenue' ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
+          type: (inv.document_type === 'revenue' || inv.document_type === 'credit_note') ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
           name: inv.supplier_name || inv.file_name || 'Sans nom',
           amount: inv.total_ttc || 0,
           date: inv.invoice_date || '',
@@ -413,7 +413,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
         const data = await res.json()
         const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
           id: inv.id,
-          type: inv.document_type === 'revenue' ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
+          type: (inv.document_type === 'revenue' || inv.document_type === 'credit_note') ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
           name: inv.supplier_name || inv.file_name || 'Sans nom',
           amount: inv.total_ttc || 0,
           date: inv.invoice_date || '',
@@ -877,7 +877,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                         .then(res => res.ok ? res.json() : { invoices: [] })
                         .then(data => {
                           setSearchResults((data.invoices || []).map((inv: any) => ({
-                            id: inv.id, type: inv.document_type === 'revenue' ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
+                            id: inv.id, type: (inv.document_type === 'revenue' || inv.document_type === 'credit_note') ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
                             name: inv.supplier_name || inv.file_name || 'Sans nom',
                             amount: inv.total_ttc || 0, date: inv.invoice_date || '', file_name: inv.file_name || '',
                           })))
@@ -1024,7 +1024,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                       if (res.ok) {
                         const data = await res.json()
                         setSearchResults((data.invoices || []).map((inv: any) => ({
-                          id: inv.id, type: inv.document_type === 'revenue' ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
+                          id: inv.id, type: (inv.document_type === 'revenue' || inv.document_type === 'credit_note') ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
                           name: inv.supplier_name || inv.file_name || 'Sans nom',
                           amount: inv.total_ttc || 0, date: inv.invoice_date || '', file_name: inv.file_name || '',
                         })))
