@@ -1046,62 +1046,113 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                 {!searching && searchResults.length === 0 && (
                   <p className="py-6 text-center text-sm text-gray-500">Aucune facture trouvee. Tapez pour rechercher.</p>
                 )}
-                {searchResults.map((candidate) => (
-                  <button
-                    key={candidate.id}
-                    onClick={async () => {
-                      setMatchingMulti(true)
-                      try {
-                        // Match all selected transactions
-                        for (const txId of selectedTxIds) {
-                          const tx = transactions.find(t => t.id === txId)
-                          if (!tx) continue
+                {searchResults.map((candidate) => {
+                  const isSelected = selectedCandidateIds.includes(candidate.id)
+                  const totalAmt = selectedTxIds.reduce((s, id) => { const tx = transactions.find(t => t.id === id); return s + (tx?.debit || tx?.credit || 0) }, 0)
+                  const isExactMatch = Math.abs(candidate.amount - totalAmt) <= 0.01
+                  return (
+                    <div
+                      key={candidate.id}
+                      className={`flex items-center gap-2 rounded-lg border p-2.5 transition-all ${
+                        isSelected ? 'border-accent-green/50 bg-accent-green/5' : isExactMatch ? 'border-accent-green/20 bg-accent-green/5' : 'border-dark-border bg-dark-input'
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={isSelected}
+                        onChange={() => setSelectedCandidateIds(prev =>
+                          prev.includes(candidate.id) ? prev.filter(id => id !== candidate.id) : [...prev, candidate.id]
+                        )}
+                        className="h-4 w-4 shrink-0 rounded border-dark-border bg-dark-input text-accent-green focus:ring-accent-green/50 cursor-pointer"
+                      />
+                      <div className="flex items-center gap-2 min-w-0 flex-1">
+                        {candidate.type === 'invoice' ? (
+                          <ArrowDownRight className="h-4 w-4 shrink-0 text-accent-red" />
+                        ) : (
+                          <ArrowUpRight className="h-4 w-4 shrink-0 text-accent-green" />
+                        )}
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-medium text-gray-200">{candidate.name}</p>
+                          {candidate.file_name && candidate.file_name !== candidate.name && (
+                            <p className="truncate text-xs text-gray-500">{candidate.file_name}</p>
+                          )}
+                        </div>
+                      </div>
+                      <div className="shrink-0 text-right flex items-center gap-2">
+                        <div>
+                          <p className="font-mono text-sm font-medium text-gray-200">{fmt(candidate.amount)}</p>
+                          <p className="text-xs text-gray-500">{candidate.date ? new Date(candidate.date).toLocaleDateString('fr-FR') : '-'}</p>
+                        </div>
+                        {isExactMatch && (
+                          <span className="rounded bg-accent-green/10 px-1 py-0.5 text-[9px] font-bold text-accent-green">MATCH</span>
+                        )}
+                        <button
+                          onClick={(e) => { e.stopPropagation(); handlePreview(candidate) }}
+                          className="rounded p-1 text-gray-500 hover:bg-dark-hover hover:text-gray-200"
+                          title="Voir le document"
+                        >
+                          <Eye className="h-4 w-4" />
+                        </button>
+                      </div>
+                    </div>
+                  )
+                })}
+              </div>
+
+              {/* Confirm button for multi-match */}
+              {selectedCandidateIds.length > 0 && (
+                <button
+                  onClick={async () => {
+                    setMatchingMulti(true)
+                    try {
+                      for (const txId of selectedTxIds) {
+                        const tx = transactions.find(t => t.id === txId)
+                        if (!tx) continue
+                        for (const cId of selectedCandidateIds) {
+                          const c = searchResults.find(r => r.id === cId)
+                          if (!c) continue
                           const body: Record<string, string> = { transaction_id: txId }
-                          if (candidate.type === 'invoice') body.invoice_id = candidate.id
-                          else body.revenue_id = candidate.id
+                          if (c.type === 'invoice') body.invoice_id = c.id
+                          else body.revenue_id = c.id
                           await authFetch(`/api/bank-statements/${statementId}/match`, {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify(body),
                           })
                         }
-                        // Create auto-match rule if checked
-                        if (createAutoRule && autoRulePattern.trim()) {
+                      }
+                      // Create auto-match rule if checked
+                      if (createAutoRule && autoRulePattern.trim() && selectedCandidateIds.length === 1) {
+                        const c = searchResults.find(r => r.id === selectedCandidateIds[0])
+                        if (c) {
                           await authFetch('/api/auto-match-rules', {
                             method: 'POST',
                             headers: { 'Content-Type': 'application/json' },
                             body: JSON.stringify({
                               pattern: autoRulePattern.trim(),
                               match_type: 'contains',
-                              document_id: candidate.id,
-                              document_type: candidate.type,
-                              document_name: candidate.name || candidate.file_name,
-                              description: `"${autoRulePattern.trim()}" → ${candidate.name || candidate.file_name}`,
+                              document_id: c.id,
+                              document_type: c.type,
+                              document_name: c.name || c.file_name,
+                              description: `"${autoRulePattern.trim()}" → ${c.name || c.file_name}`,
                             }),
                           })
                         }
-                        setMultiMatchModal(false)
-                        setSelectedTxIds([])
-                        await fetchData()
-                      } catch (e) { console.error('Multi match error:', e) }
-                      setMatchingMulti(false)
-                    }}
-                    disabled={matchingMulti}
-                    className="w-full rounded-lg border border-dark-border bg-dark-input p-3 text-left transition-all hover:border-accent-green/50 hover:bg-accent-green/5 disabled:opacity-50"
-                  >
-                    <div className="flex items-center justify-between">
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-medium text-gray-200">{candidate.name}</p>
-                        {candidate.file_name && <p className="truncate text-xs text-gray-500">{candidate.file_name}</p>}
-                      </div>
-                      <div className="shrink-0 text-right ml-3">
-                        <p className="font-mono text-sm font-medium text-gray-200">{fmt(candidate.amount)}</p>
-                        <p className="text-xs text-gray-500">{candidate.date ? new Date(candidate.date).toLocaleDateString('fr-FR') : '-'}</p>
-                      </div>
-                    </div>
-                  </button>
-                ))}
-              </div>
+                      }
+                      setMultiMatchModal(false)
+                      setSelectedTxIds([])
+                      setSelectedCandidateIds([])
+                      await fetchData()
+                    } catch (e) { console.error('Multi match error:', e) }
+                    setMatchingMulti(false)
+                  }}
+                  disabled={matchingMulti}
+                  className="w-full flex items-center justify-center gap-2 rounded-lg bg-accent-green px-4 py-2.5 text-sm font-bold text-dark-bg hover:bg-accent-green/90 disabled:opacity-50"
+                >
+                  {matchingMulti ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
+                  Pointer {selectedTxIds.length} transaction(s) → {selectedCandidateIds.length} document(s)
+                </button>
+              )}
 
               {/* Auto-rule option */}
               {autoRulePattern && (
