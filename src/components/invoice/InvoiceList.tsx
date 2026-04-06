@@ -517,14 +517,12 @@ export default function InvoiceList() {
                 } catch {
                   errors++
                 }
-                // Delay to avoid rate limits
-                if (done < pendingInvoices.length) {
+                if (done + errors < pendingInvoices.length) {
                   await new Promise((r) => setTimeout(r, 3000))
                 }
               }
               setScanProgress(`${done} scannee(s)${errors > 0 ? `, ${errors} erreur(s)` : ''}`)
               fetchInvoices()
-              // Auto-rename after scan
               try {
                 await authFetch('/api/invoices/batch-rename', { method: 'POST' })
                 fetchInvoices()
@@ -536,7 +534,45 @@ export default function InvoiceList() {
             title="Scanner toutes les factures en attente avec l'IA"
           >
             {batchScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
-            Scanner en attente
+            En attente
+          </button>
+          <button
+            onClick={async () => {
+              const amazonInvoices = invoices.filter((inv) => {
+                const name = ((inv.supplier_name || '') + ' ' + (inv.file_name || '')).toLowerCase()
+                return name.includes('amazon')
+              })
+              if (amazonInvoices.length === 0) {
+                setScanProgress('Aucune facture Amazon trouvee')
+                return
+              }
+              if (!confirm(`Rescanner ${amazonInvoices.length} facture(s) Amazon ? Cela peut prendre plusieurs minutes.`)) return
+              setBatchScanning(true)
+              let done = 0
+              let errors = 0
+              for (const inv of amazonInvoices) {
+                setScanProgress(`Rescan Amazon ${done + 1}/${amazonInvoices.length}...`)
+                try {
+                  await rescanInvoice(inv.id)
+                  done++
+                } catch { errors++ }
+                if (done + errors < amazonInvoices.length) {
+                  await new Promise((r) => setTimeout(r, 5000))
+                }
+              }
+              setScanProgress(`Amazon: ${done} rescannee(s)${errors > 0 ? `, ${errors} erreur(s)` : ''}`)
+              try {
+                await authFetch('/api/invoices/batch-rename', { method: 'POST' })
+              } catch {}
+              fetchInvoices()
+              setBatchScanning(false)
+            }}
+            disabled={batchScanning || renaming}
+            className="flex items-center gap-1.5 rounded-lg border border-blue-500/50 px-3 py-1.5 text-xs text-blue-400 hover:bg-blue-500/10 transition-colors disabled:opacity-50"
+            title="Rescanner toutes les factures Amazon (multi-pages)"
+          >
+            {batchScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Rescan Amazon
           </button>
           <button
             onClick={async () => {
