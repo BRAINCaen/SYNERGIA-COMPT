@@ -40,6 +40,8 @@ export default function InvoiceList() {
   const [renameResult, setRenameResult] = useState<string | null>(null)
   const [batchScanning, setBatchScanning] = useState(false)
   const [scanProgress, setScanProgress] = useState('')
+  const [deduplicating, setDeduplicating] = useState(false)
+  const [dedupeResult, setDedupeResult] = useState<string | null>(null)
   const { user } = useAuth()
   const authFetch = useAuthFetch()
 
@@ -508,11 +510,36 @@ export default function InvoiceList() {
             {batchScanning ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Search className="h-3.5 w-3.5" />}
             Scanner en attente
           </button>
+          <button
+            onClick={async () => {
+              if (!confirm('Supprimer les factures en double (meme fournisseur + montant + numero) ?')) return
+              setDeduplicating(true)
+              setDedupeResult(null)
+              try {
+                const res = await authFetch('/api/invoices/deduplicate', { method: 'POST' })
+                if (res.ok) {
+                  const data = await res.json()
+                  setDedupeResult(data.deleted > 0 ? `${data.deleted} doublon(s) supprime(s)` : 'Aucun doublon')
+                  if (data.deleted > 0) fetchInvoices()
+                }
+              } catch { setDedupeResult('Erreur') }
+              setDeduplicating(false)
+            }}
+            disabled={deduplicating || batchScanning}
+            className="flex items-center gap-1.5 rounded-lg border border-accent-red/50 px-3 py-1.5 text-xs text-accent-red hover:bg-accent-red/10 transition-colors disabled:opacity-50"
+            title="Supprimer les factures en double"
+          >
+            {deduplicating ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <Trash2 className="h-3.5 w-3.5" />}
+            Doublons
+          </button>
           {renameResult && (
             <span className="text-xs text-accent-green">{renameResult}</span>
           )}
           {scanProgress && (
             <span className="text-xs text-accent-orange">{scanProgress}</span>
+          )}
+          {dedupeResult && (
+            <span className="text-xs text-accent-red">{dedupeResult}</span>
           )}
         </div>
       </div>
