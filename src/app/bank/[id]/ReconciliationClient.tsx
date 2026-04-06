@@ -26,6 +26,8 @@ import {
 
 type TransactionStatus = 'matched' | 'unmatched' | 'ignored'
 type FilterTab = 'all' | 'unmatched' | 'matched' | 'debits' | 'credits'
+type SortKey = 'date' | 'label' | 'debit' | 'credit'
+type SortDir = 'asc' | 'desc'
 
 interface MatchedEntity {
   id: string
@@ -73,6 +75,10 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState<FilterTab>('all')
+  const [filterStatus, setFilterStatus] = useState<'all' | 'unmatched' | 'matched' | 'ignored'>('all')
+  const [filterType, setFilterType] = useState<'all' | 'debits' | 'credits'>('all')
+  const [sortKey, setSortKey] = useState<SortKey>('date')
+  const [sortDir, setSortDir] = useState<SortDir>('asc')
   const [matchModalTx, setMatchModalTx] = useState<Transaction | null>(null)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<MatchCandidate[]>([])
@@ -155,24 +161,50 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const matchPercent = totalCount > 0 ? Math.round((treatedCount / totalCount) * 100) : 0
 
   const filteredTransactions = transactions.filter((t) => {
-    // Tab filter
-    let tabMatch = true
-    switch (activeTab) {
-      case 'unmatched': tabMatch = t.status === 'unmatched'; break
-      case 'matched': tabMatch = t.status === 'matched'; break
-      case 'debits': tabMatch = t.debit != null && t.debit > 0; break
-      case 'credits': tabMatch = t.credit != null && t.credit > 0; break
+    // Legacy tab filter (still used for tab highlighting)
+    if (activeTab !== 'all') {
+      switch (activeTab) {
+        case 'unmatched': if (t.status !== 'unmatched') return false; break
+        case 'matched': if (t.status !== 'matched') return false; break
+        case 'debits': if (!(t.debit != null && t.debit > 0)) return false; break
+        case 'credits': if (!(t.credit != null && t.credit > 0)) return false; break
+      }
     }
-    if (!tabMatch) return false
+    // Cumulative status filter
+    if (filterStatus !== 'all') {
+      if (filterStatus === 'unmatched' && t.status !== 'unmatched') return false
+      if (filterStatus === 'matched' && t.status !== 'matched') return false
+      if (filterStatus === 'ignored' && t.status !== 'ignored') return false
+    }
+    // Cumulative type filter
+    if (filterType === 'debits' && !(t.debit != null && t.debit > 0)) return false
+    if (filterType === 'credits' && !(t.credit != null && t.credit > 0)) return false
     // Search filter
     if (txSearch.trim()) {
       const q = txSearch.toLowerCase()
       const label = (t.label || '').toLowerCase()
       const date = (t.date || '')
       const amount = String(t.debit || t.credit || '')
-      return label.includes(q) || date.includes(q) || amount.includes(q)
+      if (!label.includes(q) && !date.includes(q) && !amount.includes(q)) return false
     }
     return true
+  }).sort((a, b) => {
+    let cmp = 0
+    switch (sortKey) {
+      case 'date':
+        cmp = (a.date || '').localeCompare(b.date || '')
+        break
+      case 'label':
+        cmp = (a.label || '').localeCompare(b.label || '')
+        break
+      case 'debit':
+        cmp = (a.debit || 0) - (b.debit || 0)
+        break
+      case 'credit':
+        cmp = (a.credit || 0) - (b.credit || 0)
+        break
+    }
+    return sortDir === 'desc' ? -cmp : cmp
   })
 
   const tabs: { key: FilterTab; label: string; count?: number }[] = [
@@ -609,23 +641,45 @@ export default function ReconciliationClient({ statementId }: { statementId: str
           </div>
         </div>
 
-        {/* Filter tabs */}
+        {/* Filter tabs — cumulative */}
         <div className="flex items-center gap-4 flex-wrap">
-          <div className="flex flex-wrap gap-2">
-            {tabs.map((tab) => (
+          <div className="flex flex-wrap gap-1.5">
+            {/* Status filters */}
+            {([
+              { key: 'all', label: 'Tous', count: totalCount },
+              { key: 'unmatched', label: 'Non rapproches', count: transactions.filter(t => t.status === 'unmatched').length },
+              { key: 'matched', label: 'Rapproches', count: matchedCount },
+              { key: 'ignored', label: 'Ignores', count: ignoredCount },
+            ] as { key: typeof filterStatus; label: string; count: number }[]).map((f) => (
               <button
-                key={tab.key}
-                onClick={() => setActiveTab(tab.key)}
-                className={`rounded-lg px-3 py-1.5 text-sm font-medium transition-colors ${
-                  activeTab === tab.key
-                    ? 'bg-accent-green/10 text-accent-green'
-                    : 'bg-dark-card text-gray-400 hover:bg-dark-hover hover:text-gray-200'
+                key={f.key}
+                onClick={() => { setFilterStatus(f.key); setActiveTab('all') }}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                  filterStatus === f.key
+                    ? 'bg-accent-green/10 text-accent-green border border-accent-green/30'
+                    : 'bg-dark-card text-gray-400 hover:bg-dark-hover border border-transparent'
                 }`}
               >
-                {tab.label}
-                {tab.count != null && (
-                  <span className="ml-1.5 font-mono text-xs opacity-70">{tab.count}</span>
-                )}
+                {f.label} <span className="font-mono opacity-70">{f.count}</span>
+              </button>
+            ))}
+            <span className="mx-1 h-5 w-px bg-dark-border self-center" />
+            {/* Type filters */}
+            {([
+              { key: 'all', label: 'Tous types' },
+              { key: 'debits', label: 'Debits', count: transactions.filter(t => t.debit != null && t.debit > 0).length },
+              { key: 'credits', label: 'Credits', count: transactions.filter(t => t.credit != null && t.credit > 0).length },
+            ] as { key: typeof filterType; label: string; count?: number }[]).map((f) => (
+              <button
+                key={f.key}
+                onClick={() => { setFilterType(f.key); setActiveTab('all') }}
+                className={`rounded-lg px-2.5 py-1 text-xs font-medium transition-colors ${
+                  filterType === f.key
+                    ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30'
+                    : 'bg-dark-card text-gray-400 hover:bg-dark-hover border border-transparent'
+                }`}
+              >
+                {f.label} {f.count != null && <span className="font-mono opacity-70">{f.count}</span>}
               </button>
             ))}
           </div>
@@ -668,18 +722,28 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                     )
                   })()}
                 </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Date
-                </th>
-                <th className="px-4 py-3 text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Libelle
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Debit
-                </th>
-                <th className="px-4 py-3 text-right text-xs font-semibold uppercase tracking-wider text-gray-500">
-                  Credit
-                </th>
+                {([
+                  { key: 'date' as SortKey, label: 'Date', align: 'left' },
+                  { key: 'label' as SortKey, label: 'Libelle', align: 'left' },
+                  { key: 'debit' as SortKey, label: 'Debit', align: 'right' },
+                  { key: 'credit' as SortKey, label: 'Credit', align: 'right' },
+                ]).map((col) => (
+                  <th
+                    key={col.key}
+                    onClick={() => {
+                      if (sortKey === col.key) setSortDir(sortDir === 'asc' ? 'desc' : 'asc')
+                      else { setSortKey(col.key); setSortDir(col.key === 'label' ? 'asc' : 'asc') }
+                    }}
+                    className={`px-4 py-3 text-xs font-semibold uppercase tracking-wider cursor-pointer select-none transition-colors hover:text-accent-green ${
+                      col.align === 'right' ? 'text-right' : ''
+                    } ${sortKey === col.key ? 'text-accent-green' : 'text-gray-500'}`}
+                  >
+                    {col.label}
+                    {sortKey === col.key && (
+                      <span className="ml-1">{sortDir === 'asc' ? '↑' : '↓'}</span>
+                    )}
+                  </th>
+                ))}
                 <th className="px-4 py-3 text-center text-xs font-semibold uppercase tracking-wider text-gray-500">
                   Statut
                 </th>
