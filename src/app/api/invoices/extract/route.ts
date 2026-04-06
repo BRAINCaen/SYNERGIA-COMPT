@@ -36,7 +36,14 @@ RÈGLES STRICTES :
 - null si information illisible ou absente
 - Pour les taux de TVA, utilise le pourcentage (ex: 20 pour 20%)
 - Vérifier : somme des lignes ≈ total document
-- Si multi-pages, analyser TOUTES les pages
+
+MULTI-PAGES (TRÈS IMPORTANT) :
+- Tu DOIS analyser TOUTES les pages du document, pas seulement la première
+- Pour Amazon, chaque page peut lister des produits différents de la MÊME commande : additionne TOUT
+- Le total TTC = somme de TOUTES les pages, pas le montant d'une seule page
+- Cherche le "Total de la commande" ou "Order Total" sur la dernière page
+- Si plusieurs pages ont chacune un sous-total, le total final est la somme de tous les sous-totaux
+- Chaque produit de chaque page doit être une ligne séparée dans "lines"
 
 Réponds UNIQUEMENT avec le JSON suivant (pas de texte autour) :
 {
