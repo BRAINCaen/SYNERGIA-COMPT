@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useMemo, useCallback } from 'react'
 import Link from 'next/link'
-import { useAuthFetch } from '@/lib/firebase/auth-context'
+import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge } from '@/components/ui/Badge'
 import { FileText, Search, Filter, ChevronDown, ChevronRight, Calendar, Trash2, X, CheckSquare, Landmark, RefreshCw, Loader2 } from 'lucide-react'
 import type { Invoice, InvoiceStatus } from '@/types'
@@ -38,6 +38,7 @@ export default function InvoiceList() {
   const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false)
   const [renaming, setRenaming] = useState(false)
   const [renameResult, setRenameResult] = useState<string | null>(null)
+  const { user } = useAuth()
   const authFetch = useAuthFetch()
 
   const rescanInvoice = async (invoiceId: string) => {
@@ -140,11 +141,13 @@ export default function InvoiceList() {
   }
 
   useEffect(() => {
-    fetchInvoices()
-  }, [statusFilter])
+    if (user) fetchInvoices()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, statusFilter])
 
   // Load matched IDs separately (non-blocking)
   useEffect(() => {
+    if (!user) return
     const loadMatched = async () => {
       try {
         const res = await authFetch('/api/bank-statements/transactions?match_status=matched')
