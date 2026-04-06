@@ -51,11 +51,48 @@ Règles :
 - Si le montant HT n'est pas explicite, calculer : amount_ht = amount_ttc / (1 + tva_rate/100)
 - Si pas de TVA mentionnée, tva_rate = 0 et amount_ht = amount_ttc`
 
+    // Determine content type based on file
+    const fileType = file.type || ''
+    const fileName = file.name?.toLowerCase() || ''
+    const isImage = fileType.startsWith('image/') || /\.(jpg|jpeg|png|webp|gif)$/.test(fileName)
+    const isCsv = fileType === 'text/csv' || fileName.endsWith('.csv')
+    const isExcel = fileType.includes('spreadsheet') || fileType.includes('excel') || /\.(xlsx?|xls)$/.test(fileName)
+
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    const content: any[] = [
-      { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
-      { type: 'text', text: prompt },
-    ]
+    let content: any[]
+
+    if (isCsv || isExcel) {
+      // For CSV/Excel: send as text (Claude can't read binary Excel, but CSV is text)
+      let textContent = ''
+      if (isCsv) {
+        // Try UTF-8, fallback to Latin-1
+        textContent = new TextDecoder('utf-8').decode(buffer)
+        if (textContent.includes('\ufffd')) {
+          textContent = new TextDecoder('iso-8859-1').decode(buffer)
+        }
+      } else {
+        textContent = `[Fichier Excel: ${file.name}] — Contenu binaire non lisible directement. Voici les premiers octets en base64 pour référence.`
+      }
+      content = [
+        { type: 'text', text: `Voici un fichier CSV/tableur d'encaissements :\n\n${textContent.slice(0, 15000)}\n\n${prompt}` },
+      ]
+    } else if (isImage) {
+      // For images: send as image
+      let mediaType: 'image/jpeg' | 'image/png' | 'image/webp' | 'image/gif' = 'image/jpeg'
+      if (fileType === 'image/png') mediaType = 'image/png'
+      else if (fileType === 'image/webp') mediaType = 'image/webp'
+      else if (fileType === 'image/gif') mediaType = 'image/gif'
+      content = [
+        { type: 'image', source: { type: 'base64', media_type: mediaType, data: base64 } },
+        { type: 'text', text: prompt },
+      ]
+    } else {
+      // Default: PDF
+      content = [
+        { type: 'document', source: { type: 'base64', media_type: 'application/pdf', data: base64 } },
+        { type: 'text', text: prompt },
+      ]
+    }
 
     // Call Claude with retry on 429
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

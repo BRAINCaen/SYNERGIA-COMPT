@@ -435,7 +435,7 @@ export default function RevenueClient() {
         >
           <Upload className="mx-auto h-10 w-10 text-gray-500" />
           <p className="mt-2 text-gray-300">
-            Glissez-deposez vos justificatifs (PDF) : factures, releves TPE, bordereaux, courriers de subvention...
+            Glissez-deposez vos justificatifs : PDF, images, CSV, Excel — releves TPE, bordereaux, factures...
           </p>
           <p className="text-xs text-gray-500">
             L&apos;IA extrait automatiquement : type, source, montant HT/TTC, TVA, reference, lignes de detail
@@ -444,7 +444,7 @@ export default function RevenueClient() {
             Parcourir les fichiers
             <input
               type="file"
-              accept=".pdf"
+              accept=".pdf,.jpg,.jpeg,.png,.webp,.csv,.xlsx,.xls"
               multiple
               className="hidden"
               onChange={(e) => e.target.files && handleFiles(e.target.files)}

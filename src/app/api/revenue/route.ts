@@ -127,21 +127,28 @@ export async function POST(request: NextRequest) {
     let fileName: string | null = null
 
     if (file) {
-      if (file.type !== 'application/pdf') {
+      const allowedTypes = [
+        'application/pdf', 'image/jpeg', 'image/png', 'image/webp', 'image/gif',
+        'text/csv', 'text/plain',
+        'application/vnd.ms-excel', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      ]
+      const ext = file.name?.split('.').pop()?.toLowerCase() || ''
+      const allowedExts = ['pdf', 'jpg', 'jpeg', 'png', 'webp', 'gif', 'csv', 'xlsx', 'xls']
+      if (!allowedTypes.includes(file.type) && !allowedExts.includes(ext)) {
         return NextResponse.json(
-          { error: 'Seuls les fichiers PDF sont acceptes' },
+          { error: 'Formats acceptes : PDF, images (JPG/PNG), CSV, Excel' },
           { status: 400 }
         )
       }
 
       const rawBytes = new Uint8Array(await file.arrayBuffer())
-      filePath = `revenue/${decoded.uid}/${Date.now()}_${crypto.randomUUID()}.pdf`
+      filePath = `revenue/${decoded.uid}/${Date.now()}_${crypto.randomUUID()}.${ext || 'pdf'}`
       fileName = file.name
 
       const bucket = adminStorage.bucket()
       const fileRef = bucket.file(filePath)
       await fileRef.save(Buffer.from(rawBytes), {
-        metadata: { contentType: 'application/pdf' },
+        metadata: { contentType: file.type || 'application/octet-stream' },
       })
     }
 
