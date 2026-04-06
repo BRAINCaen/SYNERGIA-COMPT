@@ -186,7 +186,7 @@ export default function InvoiceUploader() {
     const supplierName = (extraction.supplier?.name || '').toUpperCase().trim()
       .replace(/[^A-Z0-9\sÀ-Ü]/g, '').replace(/\s+/g, '_').slice(0, 40)
     const totalTTC = extraction.totals?.total_ttc
-    const invoiceNum = (extraction.invoice?.number || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 30)
+    const cleanInvoiceNum = (extraction.invoice?.number || '').replace(/[^A-Za-z0-9-]/g, '').slice(0, 30)
     const originalExt = files[index]?.file?.name?.split('.').pop() || 'pdf'
     let newFileName = files[index]?.file?.name || 'facture.pdf'
     if (supplierName || totalTTC != null) {
@@ -194,7 +194,7 @@ export default function InvoiceUploader() {
       if (supplierName) parts.push(supplierName)
       if (totalTTC != null) parts.push(`${totalTTC.toFixed(2).replace('.', ',')}EUR`)
       if (extractedDate) parts.push(extractedDate.slice(0, 10).replace(/-/g, ''))
-      if (invoiceNum) parts.push(invoiceNum)
+      if (cleanInvoiceNum) parts.push(cleanInvoiceNum)
       newFileName = `${parts.join('-')}.${originalExt}`
     }
 
