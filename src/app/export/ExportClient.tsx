@@ -223,19 +223,102 @@ export default function ExportClient() {
     }
   }
 
-  // Download annotated PDF for a facture (uses server-side annotation with full line data)
-  const downloadAnnotatedInvoicePdf = async (invoiceId: string): Promise<Blob | null> => {
+  // Fetch invoice detail (with lines) and annotate PDF client-side
+  const downloadAnnotatedInvoicePdf = async (invoiceId: string, filePath: string, doc: ExportableDoc): Promise<Blob | null> => {
     try {
-      const res = await authFetch(`/api/invoices/${invoiceId}/annotate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({}),
+      // Fetch invoice detail with lines
+      const detailRes = await authFetch(`/api/invoices/${invoiceId}`)
+      const detail = detailRes.ok ? await detailRes.json() : null
+      const lines = detail?.lines || []
+
+      // Download raw PDF
+      const pdfBlob = await downloadPdf(filePath)
+      if (!pdfBlob) return null
+
+      const pdfBytes = new Uint8Array(await pdfBlob.arrayBuffer())
+      const pdfDoc = await PDFDocument.load(pdfBytes)
+      const helveticaBold = await pdfDoc.embedFont(StandardFonts.HelveticaBold)
+      const helvetica = await pdfDoc.embedFont(StandardFonts.Helvetica)
+      const courier = await pdfDoc.embedFont(StandardFonts.Courier)
+      const pages = pdfDoc.getPages()
+      if (pages.length === 0) return pdfBlob
+
+      const GREEN = rgb(0, 200 / 255, 150 / 255)
+      const WHITE = rgb(1, 1, 1)
+      const GRAY = rgb(0.6, 0.6, 0.6)
+      const DARK = rgb(13 / 255, 17 / 255, 23 / 255)
+
+      // Build annotation data
+      const supplier = detail?.supplier_name || doc.label || ''
+      const invoiceNum = detail?.invoice_number || ''
+      const invoiceDate = detail?.invoice_date || doc.date || ''
+      const totalHt = detail?.total_ht
+      const totalTva = detail?.total_tva
+      const totalTtc = detail?.total_ttc || doc.amount
+
+      // === STAMP on first page (bottom-right) ===
+      const firstPage = pages[0]
+      const { width } = firstPage.getSize()
+
+      const lineCount = Math.max(lines.length, 1)
+      const stampH = 30 + lineCount * 14 + 25
+      const stampW = 300
+      const stampX = width - stampW - 10
+      const stampY = 10
+
+      // Dark background
+      firstPage.drawRectangle({ x: stampX, y: stampY, width: stampW, height: stampH, color: DARK, borderColor: GREEN, borderWidth: 1.5 })
+      // Green accent
+      firstPage.drawRectangle({ x: stampX, y: stampY + stampH - 2, width: stampW, height: 2, color: GREEN })
+
+      // Header
+      firstPage.drawText('VENTILATION COMPTABLE — SYNERGIA-COMPT', {
+        x: stampX + 5, y: stampY + stampH - 14, size: 7, font: helveticaBold, color: GREEN,
       })
-      if (res.ok) return await res.blob()
-      // Fallback to raw PDF
-      return null
-    } catch {
-      return null
+      firstPage.drawText(new Date().toLocaleDateString('fr-FR'), {
+        x: stampX + stampW - 60, y: stampY + stampH - 14, size: 6, font: helvetica, color: GRAY,
+      })
+
+      let ly = stampY + stampH - 30
+
+      if (lines.length > 0) {
+        // Show each line with PCG code
+        for (const line of lines) {
+          if (ly < stampY + 15) break
+          const pcg = line.pcg_code || '------'
+          const label = (line.pcg_label || '').slice(0, 20)
+          const desc = (line.description || '').slice(0, 25)
+          const amt = line.total_ht != null ? `${Number(line.total_ht).toFixed(2)}` : ''
+
+          firstPage.drawText(pcg, { x: stampX + 5, y: ly, size: 7, font: courier, color: GREEN })
+          firstPage.drawText(label, { x: stampX + 55, y: ly, size: 6, font: helvetica, color: GRAY })
+          firstPage.drawText(desc, { x: stampX + 140, y: ly, size: 6, font: helvetica, color: WHITE })
+          if (amt) firstPage.drawText(`${amt} EUR`, { x: stampX + stampW - 55, y: ly, size: 6, font: courier, color: WHITE })
+          ly -= 14
+        }
+      } else {
+        // No lines — show basic info
+        firstPage.drawText('Pas de lignes detaillees', { x: stampX + 5, y: ly, size: 6, font: helvetica, color: GRAY })
+        ly -= 14
+      }
+
+      // Summary line
+      ly -= 2
+      firstPage.drawRectangle({ x: stampX + 5, y: ly + 8, width: stampW - 10, height: 0.5, color: GRAY })
+      const summaryParts: string[] = []
+      if (totalHt != null) summaryParts.push(`HT: ${Number(totalHt).toFixed(2)}`)
+      if (totalTva != null && totalTva > 0) summaryParts.push(`TVA: ${Number(totalTva).toFixed(2)}`)
+      if (totalTtc != null) summaryParts.push(`TTC: ${Number(totalTtc).toFixed(2)}`)
+      firstPage.drawText(summaryParts.join(' | ') + ' EUR', {
+        x: stampX + 5, y: ly - 2, size: 7, font: helveticaBold, color: WHITE,
+      })
+
+      const annotatedBytes = await pdfDoc.save()
+      return new Blob([annotatedBytes.buffer as ArrayBuffer], { type: 'application/pdf' })
+    } catch (e) {
+      console.error('Annotate error:', e)
+      // Fallback: return raw PDF
+      return downloadPdf(filePath)
     }
   }
 
@@ -408,10 +491,8 @@ export default function ExportClient() {
               const [type, docId] = doc.id.split(':')
 
               if (type === 'facture') {
-                // Use server-side annotation (has full line data + PCG codes)
-                blob = await downloadAnnotatedInvoicePdf(docId)
-                // Fallback to raw PDF if annotation fails
-                if (!blob) blob = await downloadPdf(doc.filePath!)
+                // Client-side annotation with invoice detail + lines
+                blob = await downloadAnnotatedInvoicePdf(docId, doc.filePath!, doc)
               } else {
                 // Download raw then stamp client-side
                 blob = await downloadPdf(doc.filePath!)
