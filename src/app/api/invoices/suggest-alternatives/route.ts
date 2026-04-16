@@ -47,13 +47,16 @@ ${ALL_PCG_JSON}
 IMPORTANT :
 - Propose des comptes DIFFERENTS de ${current_pcg_code || 'aucun'}
 - Pour un repas/restaurant/livraison (Uber Eats, Deliveroo, 3minutespizza, raclette...) :
-  * Si c'est un repas du PERSONNEL/STAFF/EQUIPE (ex: "raclette Poulet curry", petit dejeuner equipe, livraison au bureau) → 62560000 REPAS PERSONNEL
-  * Si c'est un repas CLIENT (reception, rdv business) → 62570000 RECEPTIONS
-  * Si c'est un repas en DEPLACEMENT (note de frais, voyage) → 62510000 VOYAGES ET DEPLACEMENTS
-- Pour une boutique/achat materiel : distinguer petits equipements vs immobilisations
+  * Repas PERSONNEL/STAFF/EQUIPE → 62560000 REPAS PERSONNEL
+  * Repas CLIENT (reception, rdv business) → 62570000 RECEPTIONS
+  * Repas en DEPLACEMENT → 62510000 VOYAGES ET DEPLACEMENTS
+- Pour les abonnements/logiciels SaaS (ne PAS mettre en RH sauf si vraiment RH) :
+  * HEBERGEMENT WEB / CLOUD (Netlify, Vercel, OVH, AWS, Dropbox, Ionos, Wix, nom de domaine, hosting) → 61350200 HEBERGEMENT WEB ET CLOUD
+  * LOGICIEL RH (Skello, planning, pointeuse, logiciel paie) → 61350100 LOCATIONS LOGICIELS RH
+  * LOGICIEL METIER (Funbooker, Smoobu, billetterie, reservation) → 61350300 LOCATIONS LOGICIELS METIER
+  * LOGICIEL BUREAUTIQUE/IA (Office 365, Google Workspace, Adobe, ChatGPT, Claude, Canva) → 61350400 LOCATIONS LOGICIELS BUREAUTIQUE
 - Classe par ordre de pertinence
 - Explique pourquoi chaque compte est pertinent en 1 ligne
-- Propose au moins UNE alternative "repas personnel" si la ligne ressemble a un repas d'equipe
 
 Reponds UNIQUEMENT avec ce JSON (pas de texte autour) :
 {
