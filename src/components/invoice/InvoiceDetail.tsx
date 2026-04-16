@@ -630,6 +630,108 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
         </div>
         <div className="flex items-center gap-2">
           <button
+            onClick={async () => {
+              if (!invoice?.file_path) { alert('Pas de fichier PDF associe'); return }
+              if (!confirm('Relancer l\'extraction IA et la classification ? Les lignes existantes seront remplacees.')) return
+              setSaving(true)
+              try {
+                // Download PDF via proxy
+                const pdfRes = await authFetch(`/api/proxy-pdf?path=${encodeURIComponent(invoice.file_path)}`)
+                if (!pdfRes.ok) throw new Error('Telechargement PDF echoue')
+                const pdfBlob = await pdfRes.blob()
+
+                // Extract with AI
+                const form = new FormData()
+                form.append('file', new File([pdfBlob], invoice.file_name || 'document.pdf', { type: 'application/pdf' }))
+                const extractRes = await authFetch('/api/invoices/extract', { method: 'POST', body: form })
+                if (!extractRes.ok) throw new Error('Erreur extraction IA')
+                const { data: extraction } = await extractRes.json()
+
+                // Update invoice data
+                await authFetch(`/api/invoices/${invoiceId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({
+                    document_type: extraction.document_type || 'expense',
+                    is_credit_note: extraction.is_credit_note || false,
+                    supplier_name: extraction.supplier?.name,
+                    supplier_siret: extraction.supplier?.siret || null,
+                    invoice_number: extraction.invoice?.number || null,
+                    invoice_date: extraction.invoice?.date || null,
+                    due_date: extraction.invoice?.due_date || null,
+                    currency: extraction.invoice?.currency || 'EUR',
+                    total_ht: extraction.totals?.total_ht || null,
+                    total_tva: extraction.totals?.total_tva || null,
+                    total_ttc: extraction.totals?.total_ttc || null,
+                    raw_extraction: extraction,
+                    status: 'processing',
+                  }),
+                })
+
+                // Classify lines with AI
+                if (extraction.lines?.length > 0) {
+                  const classifyRes = await authFetch('/api/invoices/classify', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                      lines: extraction.lines,
+                      supplier_name: extraction.supplier?.name || 'Inconnu',
+                    }),
+                  })
+
+                  if (classifyRes.ok) {
+                    const { classifications } = await classifyRes.json()
+                    const newLines = extraction.lines.map((line: { description?: string; quantity?: number; unit_price?: number; total_ht?: number; tva_rate?: number; tva_amount?: number; total_ttc?: number }, i: number) => {
+                      const c = classifications?.find((cl: { line_index: number }) => cl.line_index === i)
+                      return {
+                        description: line.description || '',
+                        quantity: line.quantity || 1,
+                        unit_price: line.unit_price || line.total_ht,
+                        total_ht: line.total_ht || 0,
+                        tva_rate: line.tva_rate || null,
+                        tva_amount: line.tva_amount || null,
+                        total_ttc: line.total_ttc || null,
+                        pcg_code: c?.pcg_code || null,
+                        pcg_label: c?.pcg_label || null,
+                        confidence_score: c?.confidence || null,
+                        manually_corrected: false,
+                        journal_code: c?.journal_code || 'AC',
+                        reasoning: c?.reasoning || null,
+                        is_immobilization: c?.is_immobilization || false,
+                        amortization_rate: c?.amortization_rate || null,
+                        classification_method: c?.classification_method || 'ai',
+                      }
+                    })
+
+                    // Save lines
+                    await authFetch(`/api/invoices/${invoiceId}/lines`, {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ lines: newLines }),
+                    })
+
+                    await authFetch(`/api/invoices/${invoiceId}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ status: 'classified' }),
+                    })
+                  }
+                }
+
+                await fetchInvoice()
+              } catch (e) {
+                alert(`Erreur : ${e instanceof Error ? e.message : 'inconnue'}`)
+              }
+              setSaving(false)
+            }}
+            disabled={saving}
+            className="flex items-center gap-1.5 rounded-lg border border-accent-orange/50 bg-dark-card px-3 py-2 text-sm font-medium text-accent-orange hover:bg-accent-orange/10 transition-colors disabled:opacity-50"
+            title="Relancer l'extraction IA (recupere les lignes de facturation)"
+          >
+            {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
+            Rescanner
+          </button>
+          <button
             onClick={() => setShowDeleteConfirm(true)}
             className="flex items-center gap-1.5 rounded-lg border border-accent-red/30 bg-dark-card px-3 py-2 text-sm font-medium text-accent-red hover:bg-accent-red/10 transition-colors"
           >
@@ -1142,7 +1244,18 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                   </div>
                 )
               })}
-              {lines.length === 0 && <div className="p-8 text-center text-sm text-gray-500">Aucune ligne extraite</div>}
+              {lines.length === 0 && (
+                <div className="flex flex-col items-center justify-center gap-3 p-8 text-center">
+                  <AlertTriangle className="h-10 w-10 text-accent-orange/50" />
+                  <div>
+                    <p className="text-sm font-medium text-gray-300">Aucune ligne de facturation</p>
+                    <p className="mt-1 text-xs text-gray-500">
+                      L&apos;extraction IA n&apos;a pas sauvegarde de lignes pour cette facture.<br />
+                      Clique sur le bouton orange <strong className="text-accent-orange">Rescanner</strong> en haut a droite pour relancer l&apos;IA.
+                    </p>
+                  </div>
+                </div>
+              )}
             </div>
           </div>
         </div>
