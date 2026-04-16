@@ -177,7 +177,7 @@ export default function InvoiceList() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, statusFilter])
 
-  // Load matched IDs separately (non-blocking)
+  // Load matched IDs — refetches when user or invoices change to stay in sync with bank reconciliation
   useEffect(() => {
     if (!user) return
     const loadMatched = async () => {
@@ -186,14 +186,19 @@ export default function InvoiceList() {
         if (res.ok) {
           const data = await res.json()
           const txs = data.transactions || data || []
-          const ids = new Set<string>(txs.map((tx: any) => tx.matched_invoice_id).filter(Boolean))
+          // Track both matched_invoice_id AND matched_revenue_id (a facture can be expense OR revenue)
+          const ids = new Set<string>()
+          for (const tx of txs) {
+            if (tx.matched_invoice_id) ids.add(tx.matched_invoice_id)
+            if (tx.matched_revenue_id) ids.add(tx.matched_revenue_id)
+          }
           setMatchedInvoiceIds(ids)
         }
       } catch { /* non-blocking */ }
     }
     loadMatched()
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  }, [user, invoices.length])
 
   const fetchInvoices = async () => {
     setLoading(true)
