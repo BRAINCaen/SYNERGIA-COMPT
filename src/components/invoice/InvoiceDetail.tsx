@@ -6,7 +6,7 @@ import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge, ConfidenceBadge } from '@/components/ui/Badge'
 import PCGSelector from './PCGSelector'
 import {
-  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package, Landmark, Link, Search, X, Lightbulb,
+  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package, Landmark, Link, Search, X, Lightbulb, ChevronLeft, ChevronRight,
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import type { Invoice, InvoiceLine, PCGAccount } from '@/types'
@@ -34,6 +34,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [altLineIdx, setAltLineIdx] = useState<number | null>(null)
   const [altLoading, setAltLoading] = useState(false)
   const [alternatives, setAlternatives] = useState<Array<{ pcg_code: string; pcg_label: string; journal_code: string; confidence: number; reasoning: string }>>([])
+  const [allInvoiceIds, setAllInvoiceIds] = useState<string[]>([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showBankMatch, setShowBankMatch] = useState(false)
   const [bankTransactions, setBankTransactions] = useState<any[]>([])
@@ -65,6 +66,32 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     if (user) fetchInvoice()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceId, user])
+
+  // Load all invoice IDs for prev/next navigation (sorted by date desc, same as list)
+  useEffect(() => {
+    if (!user) return
+    const loadIds = async () => {
+      try {
+        const res = await authFetch('/api/invoices')
+        if (res.ok) {
+          const data = await res.json()
+          // Same sort as InvoiceList: by invoice_date or created_at desc
+          const sorted = [...data].sort((a: { invoice_date?: string; created_at?: string }, b: { invoice_date?: string; created_at?: string }) => {
+            const da = new Date(a.invoice_date || a.created_at || 0).getTime()
+            const db = new Date(b.invoice_date || b.created_at || 0).getTime()
+            return db - da
+          })
+          setAllInvoiceIds(sorted.map((inv: { id: string }) => inv.id))
+        }
+      } catch { /* */ }
+    }
+    loadIds()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user])
+
+  const currentIdx = allInvoiceIds.indexOf(invoiceId)
+  const prevId = currentIdx > 0 ? allInvoiceIds[currentIdx - 1] : null
+  const nextId = currentIdx >= 0 && currentIdx < allInvoiceIds.length - 1 ? allInvoiceIds[currentIdx + 1] : null
 
   const fetchInvoice = async () => {
     setLoading(true)
@@ -497,7 +524,30 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
-          <button onClick={() => router.push('/invoices')} className="btn-secondary p-2"><ArrowLeft className="h-4 w-4" /></button>
+          <button onClick={() => router.push('/invoices')} className="btn-secondary p-2" title="Retour a la liste"><ArrowLeft className="h-4 w-4" /></button>
+          <div className="flex items-center gap-1">
+            <button
+              onClick={() => prevId && router.push(`/invoices/${prevId}`)}
+              disabled={!prevId}
+              className="rounded-lg border border-dark-border p-2 text-gray-400 hover:bg-dark-hover hover:text-accent-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Facture precedente"
+            >
+              <ChevronLeft className="h-4 w-4" />
+            </button>
+            {allInvoiceIds.length > 0 && currentIdx >= 0 && (
+              <span className="px-2 text-xs font-mono text-gray-500">
+                {currentIdx + 1} / {allInvoiceIds.length}
+              </span>
+            )}
+            <button
+              onClick={() => nextId && router.push(`/invoices/${nextId}`)}
+              disabled={!nextId}
+              className="rounded-lg border border-dark-border p-2 text-gray-400 hover:bg-dark-hover hover:text-accent-green disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+              title="Facture suivante"
+            >
+              <ChevronRight className="h-4 w-4" />
+            </button>
+          </div>
           <div className="min-w-0 flex-1">
             {editingName ? (
               <div className="flex items-center gap-2">
