@@ -929,6 +929,54 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
             </div>
           </div>
 
+          {/* Ventilation comptable summary */}
+          {lines.length > 0 && (
+            <div className="card border-2 border-accent-green/20 bg-accent-green/5">
+              <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-accent-green">
+                Ventilation comptable
+              </h3>
+              {(() => {
+                const classified = lines.filter(l => l.pcg_code)
+                const unclassified = lines.filter(l => !l.pcg_code)
+                if (classified.length === 0) {
+                  return (
+                    <div className="flex items-center gap-2 rounded-lg bg-accent-orange/10 border border-accent-orange/30 px-3 py-2 text-sm text-accent-orange">
+                      <AlertTriangle className="h-4 w-4 shrink-0" />
+                      <span>Aucune ligne classifiee — selectionne un compte PCG ci-dessous</span>
+                    </div>
+                  )
+                }
+                return (
+                  <div className="space-y-2">
+                    {classified.map((line, i) => (
+                      <div key={i} className="flex items-center gap-3 rounded-lg bg-dark-input px-3 py-2">
+                        <span className="shrink-0 rounded bg-accent-green/20 px-2 py-0.5 text-xs font-mono font-bold text-accent-green">
+                          {line.pcg_code}
+                        </span>
+                        <div className="min-w-0 flex-1">
+                          <p className="truncate text-sm font-medium text-gray-200">{line.pcg_label || '(libelle manquant)'}</p>
+                          <p className="truncate text-xs text-gray-500">{line.description}</p>
+                        </div>
+                        <span className="shrink-0 rounded bg-dark-border px-1.5 py-0.5 text-xs font-mono text-gray-400">
+                          Jnl {line.journal_code || 'AC'}
+                        </span>
+                        <span className="shrink-0 font-mono text-sm font-bold text-gray-200">
+                          {formatAmount(line.total_ht)}
+                        </span>
+                      </div>
+                    ))}
+                    {unclassified.length > 0 && (
+                      <div className="flex items-center gap-2 rounded-lg bg-accent-orange/10 border border-accent-orange/30 px-3 py-2 text-xs text-accent-orange">
+                        <AlertTriangle className="h-3.5 w-3.5 shrink-0" />
+                        <span>{unclassified.length} ligne(s) non classifiee(s) — voir ci-dessous</span>
+                      </div>
+                    )}
+                  </div>
+                )
+              })()}
+            </div>
+          )}
+
           <div className="card max-h-[550px] overflow-y-auto p-0">
             <div className="sticky top-0 border-b border-dark-border bg-dark-card px-4 py-3 rounded-t-xl">
               <h3 className="text-sm font-semibold uppercase tracking-wider text-gray-500">Lignes de facturation ({lines.length})</h3>
@@ -985,6 +1033,14 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                         <Package className="h-3 w-3" />
                         {line.is_immobilization ? 'Immobilisation' : 'Marquer comme immobilisation ?'}
                       </button>
+                    )}
+                    {line.pcg_code && (
+                      <div className="flex items-center gap-2 rounded-lg bg-accent-green/10 border border-accent-green/30 px-2 py-1.5">
+                        <span className="shrink-0 rounded bg-accent-green/30 px-2 py-0.5 text-xs font-mono font-bold text-accent-green">
+                          {line.pcg_code}
+                        </span>
+                        <span className="truncate text-xs text-gray-300">{line.pcg_label || '(libelle manquant)'}</span>
+                      </div>
                     )}
                     <div className="flex items-center gap-2">
                       <div className="flex-1">
