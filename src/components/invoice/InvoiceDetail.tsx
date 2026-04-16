@@ -522,9 +522,9 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
 
   return (
     <div className="space-y-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-4">
-          <button onClick={() => router.push('/invoices')} className="btn-secondary p-2" title="Retour a la liste"><ArrowLeft className="h-4 w-4" /></button>
+      <div className="flex flex-wrap items-center justify-between gap-3">
+        <div className="flex items-center gap-2 min-w-0 flex-1">
+          <button onClick={() => router.push('/invoices')} className="btn-secondary p-2 shrink-0" title="Retour a la liste"><ArrowLeft className="h-4 w-4" /></button>
           <div className="flex items-center gap-1">
             <button
               onClick={() => prevId && router.push(`/invoices/${prevId}`)}
@@ -628,7 +628,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
             </div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center gap-2 shrink-0">
           <button
             onClick={async () => {
               if (!invoice?.file_path) { alert('Pas de fichier PDF associe'); return }
@@ -725,7 +725,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
               setSaving(false)
             }}
             disabled={saving}
-            className="flex items-center gap-1.5 rounded-lg border border-accent-orange/50 bg-dark-card px-3 py-2 text-sm font-medium text-accent-orange hover:bg-accent-orange/10 transition-colors disabled:opacity-50"
+            className="flex items-center gap-1.5 rounded-lg border border-accent-orange/50 bg-dark-card px-2.5 py-1.5 text-xs font-medium text-accent-orange hover:bg-accent-orange/10 transition-colors disabled:opacity-50"
             title="Relancer l'extraction IA (recupere les lignes de facturation)"
           >
             {saving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Zap className="h-4 w-4" />}
@@ -733,14 +733,14 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
           </button>
           <button
             onClick={() => setShowDeleteConfirm(true)}
-            className="flex items-center gap-1.5 rounded-lg border border-accent-red/30 bg-dark-card px-3 py-2 text-sm font-medium text-accent-red hover:bg-accent-red/10 transition-colors"
+            className="flex items-center gap-1.5 rounded-lg border border-accent-red/30 bg-dark-card px-2.5 py-1.5 text-xs font-medium text-accent-red hover:bg-accent-red/10 transition-colors"
           >
             <Trash2 className="h-4 w-4" />
             Supprimer
           </button>
           {invoice.status === 'classified' && (
-            <button onClick={handleValidate} disabled={saving} className="btn-primary">
-              {saving ? <Loader2 className="mr-2 h-4 w-4 animate-spin" /> : <CheckCircle className="mr-2 h-4 w-4" />}
+            <button onClick={handleValidate} disabled={saving} className="flex items-center gap-1.5 rounded-lg bg-accent-green px-2.5 py-1.5 text-xs font-bold text-dark-bg hover:bg-accent-green/90 transition-colors disabled:opacity-50">
+              {saving ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <CheckCircle className="h-3.5 w-3.5" />}
               Valider
             </button>
           )}
@@ -769,7 +769,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
               }
               setBankSearching(false)
             }}
-            className={`flex items-center gap-1.5 rounded-lg border px-3 py-2 text-sm font-medium transition-colors ${
+            className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-xs font-medium transition-colors ${
               bankMatched
                 ? 'border-accent-green/30 bg-accent-green/10 text-accent-green'
                 : 'border-accent-green/30 bg-dark-card text-accent-green hover:bg-accent-green/10'
