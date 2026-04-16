@@ -53,7 +53,8 @@ IMPORTANT :
 - Pour les abonnements/logiciels SaaS (ne PAS mettre en RH sauf si vraiment RH) :
   * HEBERGEMENT WEB / CLOUD (Netlify, Vercel, OVH, AWS, Dropbox, Ionos, Wix, nom de domaine, hosting) → 61350200 HEBERGEMENT WEB ET CLOUD
   * LOGICIEL RH (Skello, planning, pointeuse, logiciel paie) → 61350100 LOCATIONS LOGICIELS RH
-  * LOGICIEL METIER (Funbooker, Smoobu, billetterie, reservation) → 61350300 LOCATIONS LOGICIELS METIER
+  * LOGICIEL METIER (Funbooker, Smoobu, CRM, outil de gestion interne) → 61350300 LOCATIONS LOGICIELS METIER
+  * ATTENTION : "billetterie" et "reservation" sont nos REVENUS (ventes) pas des logiciels — ne jamais classer une facture comme ça
   * LOGICIEL BUREAUTIQUE/IA (Office 365, Google Workspace, Adobe, ChatGPT, Claude, Canva) → 61350400 LOCATIONS LOGICIELS BUREAUTIQUE
 - Classe par ordre de pertinence
 - Explique pourquoi chaque compte est pertinent en 1 ligne
