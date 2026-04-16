@@ -46,9 +46,14 @@ ${ALL_PCG_JSON}
 
 IMPORTANT :
 - Propose des comptes DIFFERENTS de ${current_pcg_code || 'aucun'}
-- Pour un repas/restaurant : pense 625100 (voyages), 623100 (repas client), ou compte de charges de personnel si repas collectif
+- Pour un repas/restaurant/livraison (Uber Eats, Deliveroo, 3minutespizza, raclette...) :
+  * Si c'est un repas du PERSONNEL/STAFF/EQUIPE (ex: "raclette Poulet curry", petit dejeuner equipe, livraison au bureau) → 62560000 REPAS PERSONNEL
+  * Si c'est un repas CLIENT (reception, rdv business) → 62570000 RECEPTIONS
+  * Si c'est un repas en DEPLACEMENT (note de frais, voyage) → 62510000 VOYAGES ET DEPLACEMENTS
+- Pour une boutique/achat materiel : distinguer petits equipements vs immobilisations
 - Classe par ordre de pertinence
-- Explique pourquoi chaque compte est pertinent
+- Explique pourquoi chaque compte est pertinent en 1 ligne
+- Propose au moins UNE alternative "repas personnel" si la ligne ressemble a un repas d'equipe
 
 Reponds UNIQUEMENT avec ce JSON (pas de texte autour) :
 {
