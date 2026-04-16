@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
-import { useAuthFetch } from '@/lib/firebase/auth-context'
+import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge, ConfidenceBadge } from '@/components/ui/Badge'
 import PCGSelector from './PCGSelector'
 import {
@@ -55,11 +55,13 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [savingAmounts, setSavingAmounts] = useState(false)
 
   const router = useRouter()
+  const { user } = useAuth()
   const authFetch = useAuthFetch()
 
   useEffect(() => {
-    fetchInvoice()
-  }, [invoiceId])
+    if (user) fetchInvoice()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceId, user])
 
   const fetchInvoice = async () => {
     setLoading(true)

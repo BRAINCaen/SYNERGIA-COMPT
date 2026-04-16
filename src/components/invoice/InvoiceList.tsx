@@ -25,8 +25,14 @@ const STATUS_OPTIONS: { value: InvoiceStatus; label: string }[] = [
 export default function InvoiceList() {
   const [invoices, setInvoices] = useState<Invoice[]>([])
   const [loading, setLoading] = useState(true)
-  const [search, setSearch] = useState('')
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'all'>('all')
+  const [search, setSearch] = useState(() => {
+    if (typeof window === 'undefined') return ''
+    return sessionStorage.getItem('invList.search') || ''
+  })
+  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | 'all'>(() => {
+    if (typeof window === 'undefined') return 'all'
+    return (sessionStorage.getItem('invList.statusFilter') as InvoiceStatus | 'all') || 'all'
+  })
   const [selectedYear, setSelectedYear] = useState<number | null>(null)
   const [expandedMonths, setExpandedMonths] = useState<Set<number>>(new Set())
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set())
@@ -36,7 +42,10 @@ export default function InvoiceList() {
   const [actionLoading, setActionLoading] = useState(false)
   const [matchedInvoiceIds, setMatchedInvoiceIds] = useState<Set<string>>(new Set())
   const [rescanningIds, setRescanningIds] = useState<Set<string>>(new Set())
-  const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(false)
+  const [showUnmatchedOnly, setShowUnmatchedOnly] = useState(() => {
+    if (typeof window === 'undefined') return false
+    return sessionStorage.getItem('invList.showUnmatchedOnly') === '1'
+  })
   const [renaming, setRenaming] = useState(false)
   const [renameResult, setRenameResult] = useState<string | null>(null)
   const [batchScanning, setBatchScanning] = useState(false)
@@ -176,6 +185,20 @@ export default function InvoiceList() {
     if (user) fetchInvoices()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, statusFilter])
+
+  // Persist filters in sessionStorage
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('invList.search', search)
+  }, [search])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('invList.statusFilter', statusFilter)
+  }, [statusFilter])
+  useEffect(() => {
+    if (typeof window === 'undefined') return
+    sessionStorage.setItem('invList.showUnmatchedOnly', showUnmatchedOnly ? '1' : '0')
+  }, [showUnmatchedOnly])
 
   // Load matched IDs — refetches when user or invoices change to stay in sync with bank reconciliation
   useEffect(() => {
