@@ -6,7 +6,7 @@ import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge, ConfidenceBadge } from '@/components/ui/Badge'
 import PCGSelector from './PCGSelector'
 import {
-  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package, Landmark, Link, Search, X,
+  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package, Landmark, Link, Search, X, Lightbulb,
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import type { Invoice, InvoiceLine, PCGAccount } from '@/types'
@@ -31,6 +31,9 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [editingName, setEditingName] = useState(false)
   const [newFileName, setNewFileName] = useState('')
   const [renaming, setRenaming] = useState(false)
+  const [altLineIdx, setAltLineIdx] = useState<number | null>(null)
+  const [altLoading, setAltLoading] = useState(false)
+  const [alternatives, setAlternatives] = useState<Array<{ pcg_code: string; pcg_label: string; journal_code: string; confidence: number; reasoning: string }>>([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showBankMatch, setShowBankMatch] = useState(false)
   const [bankTransactions, setBankTransactions] = useState<any[]>([])
@@ -1039,7 +1042,37 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                         <span className="shrink-0 rounded bg-accent-green/30 px-2 py-0.5 text-xs font-mono font-bold text-accent-green">
                           {line.pcg_code}
                         </span>
-                        <span className="truncate text-xs text-gray-300">{line.pcg_label || '(libelle manquant)'}</span>
+                        <span className="truncate text-xs text-gray-300 flex-1">{line.pcg_label || '(libelle manquant)'}</span>
+                        <button
+                          onClick={async () => {
+                            setAltLineIdx(index)
+                            setAltLoading(true)
+                            setAlternatives([])
+                            try {
+                              const res = await authFetch('/api/invoices/suggest-alternatives', {
+                                method: 'POST',
+                                headers: { 'Content-Type': 'application/json' },
+                                body: JSON.stringify({
+                                  description: line.description,
+                                  supplier_name: invoice.supplier_name,
+                                  total_ht: line.total_ht,
+                                  current_pcg_code: line.pcg_code,
+                                  document_type: invoice.document_type,
+                                }),
+                              })
+                              if (res.ok) {
+                                const data = await res.json()
+                                setAlternatives(data.alternatives || [])
+                              }
+                            } catch { /* */ }
+                            setAltLoading(false)
+                          }}
+                          className="shrink-0 flex items-center gap-1 rounded-lg bg-accent-orange/20 px-2 py-1 text-xs font-medium text-accent-orange hover:bg-accent-orange/30 transition-colors"
+                          title="Pas d'accord ? Voir d'autres propositions"
+                        >
+                          <Lightbulb className="h-3 w-3" />
+                          Pas d&apos;accord ?
+                        </button>
                       </div>
                     )}
                     <div className="flex items-center gap-2">
@@ -1066,6 +1099,79 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
       </div>
 
       {/* Delete confirmation dialog */}
+      {/* Alternatives modal */}
+      {altLineIdx !== null && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm" onClick={() => setAltLineIdx(null)}>
+          <div className="mx-4 w-full max-w-xl rounded-2xl border border-dark-border bg-dark-card p-6 shadow-2xl" onClick={(e) => e.stopPropagation()}>
+            <div className="mb-4 flex items-center gap-3">
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-accent-orange/10">
+                <Lightbulb className="h-5 w-5 text-accent-orange" />
+              </div>
+              <div>
+                <h3 className="text-lg font-semibold text-white">Propositions alternatives</h3>
+                <p className="text-xs text-gray-500">
+                  Pour : {lines[altLineIdx]?.description}
+                </p>
+              </div>
+            </div>
+
+            {altLoading ? (
+              <div className="flex flex-col items-center justify-center py-12">
+                <Loader2 className="mb-3 h-8 w-8 animate-spin text-accent-orange" />
+                <p className="text-sm text-gray-400">L&apos;IA analyse d&apos;autres comptes possibles...</p>
+              </div>
+            ) : alternatives.length === 0 ? (
+              <p className="py-8 text-center text-sm text-gray-500">Aucune alternative trouvee.</p>
+            ) : (
+              <div className="space-y-2">
+                {alternatives.map((alt, i) => (
+                  <button
+                    key={i}
+                    onClick={() => {
+                      updateLine(altLineIdx, alt.pcg_code, alt.pcg_label)
+                      updateJournal(altLineIdx, alt.journal_code)
+                      setAltLineIdx(null)
+                    }}
+                    className="w-full rounded-lg border border-dark-border bg-dark-input p-3 text-left transition-colors hover:border-accent-green/50 hover:bg-accent-green/5"
+                  >
+                    <div className="flex items-start gap-3">
+                      <span className="shrink-0 rounded bg-accent-green/20 px-2 py-0.5 text-sm font-mono font-bold text-accent-green">
+                        {alt.pcg_code}
+                      </span>
+                      <div className="min-w-0 flex-1">
+                        <p className="text-sm font-medium text-gray-200">{alt.pcg_label}</p>
+                        <p className="mt-1 text-xs italic text-gray-500">{alt.reasoning}</p>
+                      </div>
+                      <div className="shrink-0 flex items-center gap-1.5">
+                        <span className="rounded bg-dark-border px-1.5 py-0.5 text-xs font-mono text-gray-400">
+                          Jnl {alt.journal_code}
+                        </span>
+                        <span className={`rounded px-1.5 py-0.5 text-xs font-bold ${
+                          alt.confidence >= 0.85 ? 'bg-accent-green/20 text-accent-green' :
+                          alt.confidence >= 0.65 ? 'bg-accent-orange/20 text-accent-orange' :
+                          'bg-accent-red/20 text-accent-red'
+                        }`}>
+                          {Math.round(alt.confidence * 100)}%
+                        </span>
+                      </div>
+                    </div>
+                  </button>
+                ))}
+              </div>
+            )}
+
+            <div className="mt-4 flex justify-end">
+              <button
+                onClick={() => setAltLineIdx(null)}
+                className="rounded-lg border border-dark-border px-4 py-2 text-sm text-gray-400 hover:bg-dark-hover"
+              >
+                Annuler
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {showDeleteConfirm && (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70" onClick={() => setShowDeleteConfirm(false)}>
           <div
