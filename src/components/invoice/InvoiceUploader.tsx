@@ -379,7 +379,9 @@ export default function InvoiceUploader() {
   ) => {
     if (!extraction?.lines) return
 
-    const linesData = extraction.lines.map((line, i) => {
+    const linesData = extraction.lines
+      .filter((line) => (line.total_ht || 0) > 0 || (line.total_ttc || 0) > 0)
+      .map((line, i) => {
       const classification = classifications?.find((c) => c.line_index === i)
       return {
         invoice_id: invoiceId,

@@ -135,7 +135,9 @@ export default function InvoiceList() {
       if (classifyRes.ok) {
         const classifyData = await classifyRes.json()
         if (classifyData.classifications) {
-          const lines = (extraction.lines || []).map((line: any, i: number) => {
+          const lines = (extraction.lines || [])
+            .filter((line: any) => (line.total_ht || 0) > 0 || (line.total_ttc || 0) > 0)
+            .map((line: any, i: number) => {
             const c = classifyData.classifications?.find((cl: any) => cl.line_index === i)
             return {
               description: line.description || '',

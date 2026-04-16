@@ -681,7 +681,9 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
 
                   if (classifyRes.ok) {
                     const { classifications } = await classifyRes.json()
-                    const newLines = extraction.lines.map((line: { description?: string; quantity?: number; unit_price?: number; total_ht?: number; tva_rate?: number; tva_amount?: number; total_ttc?: number }, i: number) => {
+                    const newLines = extraction.lines
+                      .filter((line: { total_ht?: number; total_ttc?: number }) => (line.total_ht || 0) > 0 || (line.total_ttc || 0) > 0)
+                      .map((line: { description?: string; quantity?: number; unit_price?: number; total_ht?: number; tva_rate?: number; tva_amount?: number; total_ttc?: number }, i: number) => {
                       const c = classifications?.find((cl: { line_index: number }) => cl.line_index === i)
                       return {
                         description: line.description || '',

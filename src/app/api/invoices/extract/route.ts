@@ -37,6 +37,9 @@ RÈGLES STRICTES :
 - null si information illisible ou absente
 - Pour les taux de TVA, utilise le pourcentage (ex: 20 pour 20%)
 - Vérifier : somme des lignes ≈ total document
+- IGNORER les lignes à 0€ (sous-totaux, en-têtes, lignes vides, livraison gratuite, remise 0...)
+- Ne garder que les lignes avec un montant HT > 0 OU TTC > 0
+- Les lignes d'affichage technique (intitulés de section, totaux intermédiaires) ne doivent PAS apparaître dans "lines"
 
 MULTI-PAGES (TRÈS IMPORTANT) :
 - Tu DOIS analyser TOUTES les pages du document, pas seulement la première

@@ -175,7 +175,7 @@ export async function POST(request: NextRequest) {
 
           // Save new lines
           const linesBatch = adminDb.batch()
-          for (const line of extraction.lines) {
+          for (const line of extraction.lines.filter((l: { total_ht?: number; total_ttc?: number }) => (l.total_ht || 0) > 0 || (l.total_ttc || 0) > 0)) {
             const ref = adminDb.collection('invoice_lines').doc()
             linesBatch.set(ref, {
               id: ref.id,
