@@ -28,6 +28,9 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [saving, setSaving] = useState(false)
   const [annotating, setAnnotating] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [newFileName, setNewFileName] = useState('')
+  const [renaming, setRenaming] = useState(false)
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showBankMatch, setShowBankMatch] = useState(false)
   const [bankTransactions, setBankTransactions] = useState<any[]>([])
@@ -490,8 +493,79 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-4">
           <button onClick={() => router.push('/invoices')} className="btn-secondary p-2"><ArrowLeft className="h-4 w-4" /></button>
-          <div>
-            <h1 className="text-xl font-bold text-white">{invoice.file_name}</h1>
+          <div className="min-w-0 flex-1">
+            {editingName ? (
+              <div className="flex items-center gap-2">
+                <input
+                  type="text"
+                  value={newFileName}
+                  onChange={(e) => setNewFileName(e.target.value)}
+                  autoFocus
+                  className="flex-1 rounded-lg border border-accent-green/50 bg-dark-input px-3 py-1.5 text-xl font-bold text-white focus:border-accent-green focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      (async () => {
+                        if (!newFileName.trim() || newFileName === invoice.file_name) { setEditingName(false); return }
+                        setRenaming(true)
+                        try {
+                          const res = await authFetch(`/api/invoices/${invoiceId}`, {
+                            method: 'PATCH',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ file_name: newFileName.trim() }),
+                          })
+                          if (res.ok) {
+                            setInvoice((prev) => prev ? { ...prev, file_name: newFileName.trim() } : prev)
+                            setEditingName(false)
+                          }
+                        } catch {}
+                        setRenaming(false)
+                      })()
+                    } else if (e.key === 'Escape') {
+                      setEditingName(false)
+                    }
+                  }}
+                />
+                <button
+                  onClick={async () => {
+                    if (!newFileName.trim() || newFileName === invoice.file_name) { setEditingName(false); return }
+                    setRenaming(true)
+                    try {
+                      const res = await authFetch(`/api/invoices/${invoiceId}`, {
+                        method: 'PATCH',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({ file_name: newFileName.trim() }),
+                      })
+                      if (res.ok) {
+                        setInvoice((prev) => prev ? { ...prev, file_name: newFileName.trim() } : prev)
+                        setEditingName(false)
+                      }
+                    } catch {}
+                    setRenaming(false)
+                  }}
+                  disabled={renaming}
+                  className="rounded-lg bg-accent-green px-3 py-1.5 text-sm font-semibold text-dark-bg hover:bg-accent-green/90 disabled:opacity-50"
+                >
+                  {renaming ? <Loader2 className="h-4 w-4 animate-spin" /> : <Save className="h-4 w-4" />}
+                </button>
+                <button
+                  onClick={() => setEditingName(false)}
+                  className="rounded-lg border border-dark-border px-3 py-1.5 text-sm text-gray-400 hover:bg-dark-hover"
+                >
+                  <X className="h-4 w-4" />
+                </button>
+              </div>
+            ) : (
+              <div className="group flex items-center gap-2">
+                <h1 className="truncate text-xl font-bold text-white">{invoice.file_name}</h1>
+                <button
+                  onClick={() => { setNewFileName(invoice.file_name); setEditingName(true) }}
+                  className="shrink-0 rounded-lg p-1.5 text-gray-500 opacity-0 transition-opacity hover:bg-dark-hover hover:text-accent-green group-hover:opacity-100"
+                  title="Renommer la facture"
+                >
+                  <Pencil className="h-4 w-4" />
+                </button>
+              </div>
+            )}
             <div className="mt-1 flex items-center gap-3 text-sm text-gray-500">
               {invoice.supplier_name && <span>Fournisseur : <span className="text-gray-300">{invoice.supplier_name}</span></span>}
               {invoice.invoice_number && <span className="font-mono">N deg {invoice.invoice_number}</span>}
