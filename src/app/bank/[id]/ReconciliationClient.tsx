@@ -31,7 +31,7 @@ type SortDir = 'asc' | 'desc'
 
 interface MatchedEntity {
   id: string
-  type: 'invoice' | 'revenue'
+  type: 'invoice' | 'revenue' | 'payslip'
   name: string
   amount: number
   date: string
@@ -141,11 +141,13 @@ export default function ReconciliationClient({ statementId }: { statementId: str
           debit: t.type === 'debit' ? t.amount : null,
           credit: t.type === 'credit' ? t.amount : null,
           status: t.match_status || 'unmatched',
-          matched_entity: t.matched_invoice_id
-            ? { id: t.matched_invoice_id, type: 'invoice' as const, name: '', amount: t.amount, date: t.date }
-            : t.matched_revenue_id
-              ? { id: t.matched_revenue_id, type: 'revenue' as const, name: '', amount: t.amount, date: t.date }
-              : null,
+          matched_entity: t.matched_payslip_id
+            ? { id: t.matched_payslip_id, type: 'payslip' as const, name: '', amount: t.amount, date: t.date }
+            : t.matched_invoice_id
+              ? { id: t.matched_invoice_id, type: 'invoice' as const, name: '', amount: t.amount, date: t.date }
+              : t.matched_revenue_id
+                ? { id: t.matched_revenue_id, type: 'revenue' as const, name: '', amount: t.amount, date: t.date }
+                : null,
         }))
         setTransactions(txList)
       }
@@ -783,17 +785,26 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                         {tx.status === 'matched' && tx.matched_entity ? (
                           <button
                             onClick={() => {
+                              const type = tx.matched_entity!.type
                               const path =
-                                tx.matched_entity!.type === 'invoice'
-                                  ? `/invoices/${tx.matched_entity!.id}`
-                                  : `/revenue?id=${tx.matched_entity!.id}`
+                                type === 'invoice' ? `/invoices/${tx.matched_entity!.id}` :
+                                type === 'revenue' ? `/revenue?id=${tx.matched_entity!.id}` :
+                                `/personnel?payslip=${tx.matched_entity!.id}`
                               router.push(path)
                             }}
                             className="mt-0.5 flex items-center gap-1 text-xs text-accent-green hover:underline"
-                            title={tx.matched_entity.type === 'invoice' ? 'Voir la facture' : 'Voir l\'encaissement'}
+                            title={
+                              tx.matched_entity.type === 'invoice' ? 'Voir la facture' :
+                              tx.matched_entity.type === 'revenue' ? 'Voir l\'encaissement' :
+                              'Voir le bulletin de paie'
+                            }
                           >
                             <FileText className="h-3 w-3" />
-                            {tx.matched_entity.type === 'invoice' ? 'Facture' : 'Encaissement'}
+                            {
+                              tx.matched_entity.type === 'invoice' ? 'Facture' :
+                              tx.matched_entity.type === 'revenue' ? 'Encaissement' :
+                              'Bulletin de paie'
+                            }
                           </button>
                         ) : tx.status === 'matched' && (
                           <span className="mt-0.5 flex items-center gap-1 text-xs text-gray-500 italic" title="Rapproche sans document lie">

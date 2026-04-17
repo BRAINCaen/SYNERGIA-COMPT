@@ -1,6 +1,7 @@
 'use client'
 
 import React, { useState, useEffect, useCallback, useMemo } from 'react'
+import { useSearchParams } from 'next/navigation'
 import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import AppLayout from '@/components/layout/AppLayout'
 import { useRouter } from 'next/navigation'
@@ -107,9 +108,12 @@ export default function RevenueClient() {
   const { user, loading: authLoading } = useAuth()
   const authFetch = useAuthFetch()
   const router = useRouter()
+  const searchParams = useSearchParams()
+  const highlightId = searchParams.get('id')
 
   const monthOptions = getMonthOptions()
   const [selectedMonth, setSelectedMonth] = useState(monthOptions[0].value)
+  const [highlightedEntryId, setHighlightedEntryId] = useState<string | null>(null)
   const [entries, setEntries] = useState<RevenueEntry[]>([])
   const [loading, setLoading] = useState(true)
   const [activeTab, setActiveTab] = useState('all')
@@ -150,6 +154,39 @@ export default function RevenueClient() {
     setLoading(false)
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user, selectedMonth])
+
+  // If navigated with ?id=X, find the entry's month and switch to it
+  useEffect(() => {
+    if (!user || !highlightId) return
+    const findAndJump = async () => {
+      try {
+        // Fetch ALL months to find where the entry is
+        const res = await authFetch('/api/revenue')
+        if (res.ok) {
+          const allEntries = await res.json()
+          const target = (Array.isArray(allEntries) ? allEntries : []).find((e: RevenueEntry) => e.id === highlightId)
+          if (target?.date) {
+            const month = target.date.slice(0, 7) // YYYY-MM
+            if (month !== selectedMonth) {
+              setSelectedMonth(month)
+            }
+            setHighlightedEntryId(highlightId)
+            // Scroll to element after render
+            setTimeout(() => {
+              const el = document.getElementById(`revenue-entry-${highlightId}`)
+              if (el) {
+                el.scrollIntoView({ behavior: 'smooth', block: 'center' })
+              }
+            }, 500)
+          }
+        }
+      } catch (e) {
+        console.error('Jump to entry error:', e)
+      }
+    }
+    findAndJump()
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user, highlightId])
 
   useEffect(() => {
     if (!authLoading && user) {
@@ -578,9 +615,12 @@ export default function RevenueClient() {
                 <tbody>
                   {filtered.map((entry) => {
                     const src = SOURCE_MAP[entry.source]
+                    const isHighlighted = highlightedEntryId === entry.id
                     return (
                       <React.Fragment key={entry.id}>
-                        <tr className="border-b border-dark-border/50 hover:bg-dark-hover/30">
+                        <tr
+                          id={`revenue-entry-${entry.id}`}
+                          className={`border-b border-dark-border/50 hover:bg-dark-hover/30 ${isHighlighted ? 'bg-accent-green/10 animate-pulse' : ''}`}>
                           <td className="whitespace-nowrap px-4 py-3 font-mono text-gray-200">
                             {formatDate(entry.date)}
                           </td>

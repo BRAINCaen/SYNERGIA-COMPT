@@ -40,7 +40,7 @@ export async function POST(
       const txRef = adminDb.collection('bankTransactions').doc(txId)
       batch.update(txRef, {
         match_status: 'matched',
-        matched_invoice_id: params.id,
+        matched_payslip_id: params.id,
         match_method: 'manual',
       })
     }
