@@ -1187,9 +1187,62 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                   })}
                 </div>
 
-                {selectedBankTxIds.length > 0 && (
-                  <div className="flex items-center justify-between border-t border-dark-border pt-3">
-                    <span className="text-xs text-gray-500">{selectedBankTxIds.length} transaction(s) selectionnee(s)</span>
+                {selectedBankTxIds.length > 0 && (() => {
+                  const selectedTotal = selectedBankTxIds.reduce((sum, id) => {
+                    const tx = bankTransactions.find((t: any) => t.id === id)
+                    return sum + (Number(tx?.amount) || 0)
+                  }, 0)
+                  const target = Math.abs(invoice?.total_ttc || 0)
+                  const currentTotal = matchedTxDetails.reduce((s, t) => s + (Number(t.amount) || 0), 0)
+                  const finalTotal = currentTotal + selectedTotal
+                  const diffSel = Math.abs(selectedTotal - target)
+                  const isSelMatch = diffSel < 0.01
+                  const diffFinal = Math.abs(finalTotal - target)
+                  const isFinalMatch = diffFinal < 0.01
+                  const isFinalClose = diffFinal < 1
+                  return (
+                  <div className="space-y-2 border-t border-dark-border pt-3">
+                    <div className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                      isSelMatch ? 'border-accent-green/40 bg-accent-green/10' : 'border-dark-border bg-dark-input'
+                    }`}>
+                      <div className="flex items-center gap-2">
+                        <span className="text-xs uppercase tracking-wider text-gray-500">Total selection</span>
+                        <span className={`font-mono text-base font-bold ${isSelMatch ? 'text-accent-green' : 'text-gray-200'}`}>
+                          {selectedTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        </span>
+                        <span className="text-xs text-gray-500">({selectedBankTxIds.length} lignes)</span>
+                      </div>
+                      <div className="flex items-center gap-2 text-xs">
+                        <span className="text-gray-500">vs cible :</span>
+                        <span className="font-mono font-medium text-gray-300">
+                          {target.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                        </span>
+                        {isSelMatch ? (
+                          <span className="rounded bg-accent-green/20 px-2 py-0.5 font-bold text-accent-green">MATCH</span>
+                        ) : (
+                          <span className="rounded bg-dark-border px-2 py-0.5 font-mono text-gray-400">
+                            {selectedTotal > target ? '+' : ''}{(selectedTotal - target).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                    {matchedTxDetails.length > 0 && (
+                      <div className={`flex items-center justify-between rounded-lg border px-3 py-1.5 text-xs ${
+                        isFinalMatch ? 'border-accent-green/40 bg-accent-green/5' :
+                        isFinalClose ? 'border-accent-orange/40 bg-accent-orange/5' :
+                        'border-accent-red/40 bg-accent-red/5'
+                      }`}>
+                        <span className="text-gray-500">
+                          Total final apres rapprochement :
+                          <span className={`ml-2 font-mono font-bold ${isFinalMatch ? 'text-accent-green' : isFinalClose ? 'text-accent-orange' : 'text-accent-red'}`}>
+                            {finalTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                          </span>
+                          <span className="ml-2 text-gray-600">({matchedTxDetails.length} deja + {selectedBankTxIds.length} nouveaux)</span>
+                        </span>
+                        {isFinalMatch && <span className="rounded bg-accent-green/20 px-2 py-0.5 font-bold text-accent-green">MATCH FINAL</span>}
+                      </div>
+                    )}
+                    <div className="flex items-center justify-end">
                     <button
                       onClick={async () => {
                         setBankMatching(true)
@@ -1232,8 +1285,10 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                       {bankMatching ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
                       Confirmer le rapprochement
                     </button>
+                    </div>
                   </div>
-                )}
+                  )
+                })()}
               </>
             )
           })()}

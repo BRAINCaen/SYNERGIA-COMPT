@@ -371,15 +371,70 @@ export default function RevenueDetail({ revenueId }: { revenueId: string }) {
               )
             })}
           </div>
-          {selectedTxIds.length > 0 && (
-            <div className="flex items-center justify-between border-t border-dark-border pt-3">
-              <span className="text-xs text-gray-500">{selectedTxIds.length} selectionnee(s)</span>
-              <button onClick={confirmMatch} disabled={matching}
-                className="flex items-center gap-1.5 rounded-lg bg-accent-green px-4 py-2 text-sm font-semibold text-dark-bg hover:bg-accent-green/90 disabled:opacity-50">
-                {matching ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                Confirmer
-              </button>
+          {selectedTxIds.length > 0 && (() => {
+            const selectedTotal = selectedTxIds.reduce((sum, id) => {
+              const tx = allTxs.find(t => t.id === id)
+              return sum + (tx?.amount || 0)
+            }, 0)
+            const target = entry.amount_ttc || 0
+            const currentTotal = matchedTxs.reduce((s, t) => s + (Number(t.amount) || 0), 0)
+            const finalTotal = currentTotal + selectedTotal
+            const diffSel = Math.abs(selectedTotal - target)
+            const isSelMatch = diffSel < 0.01
+            const diffFinal = Math.abs(finalTotal - target)
+            const isFinalMatch = diffFinal < 0.01
+            const isFinalClose = diffFinal < 1
+            return (
+            <div className="space-y-2 border-t border-dark-border pt-3">
+              <div className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+                isSelMatch ? 'border-accent-green/40 bg-accent-green/10' :
+                'border-dark-border bg-dark-input'
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className="text-xs uppercase tracking-wider text-gray-500">Total selection</span>
+                  <span className={`font-mono text-base font-bold ${isSelMatch ? 'text-accent-green' : 'text-gray-200'}`}>
+                    {fmt(selectedTotal)}
+                  </span>
+                  <span className="text-xs text-gray-500">({selectedTxIds.length} lignes)</span>
+                </div>
+                <div className="flex items-center gap-2 text-xs">
+                  <span className="text-gray-500">vs cible :</span>
+                  <span className="font-mono font-medium text-gray-300">{fmt(target)}</span>
+                  {isSelMatch ? (
+                    <span className="rounded bg-accent-green/20 px-2 py-0.5 font-bold text-accent-green">MATCH</span>
+                  ) : (
+                    <span className="rounded bg-dark-border px-2 py-0.5 font-mono text-gray-400">
+                      {selectedTotal > target ? '+' : ''}{fmt(selectedTotal - target)}
+                    </span>
+                  )}
+                </div>
+              </div>
+              {matchedTxs.length > 0 && (
+                <div className={`flex items-center justify-between rounded-lg border px-3 py-1.5 text-xs ${
+                  isFinalMatch ? 'border-accent-green/40 bg-accent-green/5' :
+                  isFinalClose ? 'border-accent-orange/40 bg-accent-orange/5' :
+                  'border-accent-red/40 bg-accent-red/5'
+                }`}>
+                  <span className="text-gray-500">
+                    Total final apres rapprochement :
+                    <span className={`ml-2 font-mono font-bold ${isFinalMatch ? 'text-accent-green' : isFinalClose ? 'text-accent-orange' : 'text-accent-red'}`}>
+                      {fmt(finalTotal)}
+                    </span>
+                    <span className="ml-2 text-gray-600">({matchedTxs.length} deja + {selectedTxIds.length} nouveaux)</span>
+                  </span>
+                  {isFinalMatch && <span className="rounded bg-accent-green/20 px-2 py-0.5 font-bold text-accent-green">MATCH FINAL</span>}
+                </div>
+              )}
+              <div className="flex items-center justify-end">
+                <button onClick={confirmMatch} disabled={matching}
+                  className="flex items-center gap-1.5 rounded-lg bg-accent-green px-4 py-2 text-sm font-semibold text-dark-bg hover:bg-accent-green/90 disabled:opacity-50">
+                  {matching ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
+                  Confirmer le rapprochement
+                </button>
+              </div>
             </div>
+            )
+          })()
           )}
         </div>
       )}
