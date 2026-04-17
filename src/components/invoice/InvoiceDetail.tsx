@@ -503,7 +503,24 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     try {
       const res = await authFetch(`/api/invoices/${invoiceId}`, { method: 'DELETE' })
       if (res.ok) {
-        router.push('/invoices')
+        // Navigate to the next invoice if available, else previous, else back to list
+        const idx = allInvoiceIds.indexOf(invoiceId)
+        const nextTarget = idx >= 0 && idx < allInvoiceIds.length - 1 ? allInvoiceIds[idx + 1] : null
+        const prevTarget = idx > 0 ? allInvoiceIds[idx - 1] : null
+        // Update cached list to remove the deleted ID
+        const updatedIds = allInvoiceIds.filter((id) => id !== invoiceId)
+        setAllInvoiceIds(updatedIds)
+        if (typeof window !== 'undefined') {
+          sessionStorage.setItem('invNav.ids', JSON.stringify(updatedIds))
+          sessionStorage.setItem('invNav.ts', String(Date.now()))
+        }
+        if (nextTarget) {
+          router.push(`/invoices/${nextTarget}`)
+        } else if (prevTarget) {
+          router.push(`/invoices/${prevTarget}`)
+        } else {
+          router.push('/invoices')
+        }
       }
     } catch (e) {
       console.error('Delete error:', e)
