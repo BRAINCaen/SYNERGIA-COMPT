@@ -13,19 +13,54 @@ export interface KnownSupplier {
 
 export const KNOWN_SUPPLIERS: Record<string, KnownSupplier> = {
   // Télécom
-  "ORANGE":           { account: "62620000", label: "ORANGE 02 31 52 91 26", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
-  "FREE":             { account: "62630000", label: "FREE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "ORANGE":           { account: "62620000", label: "FRAIS DE TELEPHONE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "FREE":             { account: "62630000", label: "FRAIS DE TELECOMMUNICATIONS", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "FREE PRO":         { account: "62630000", label: "FRAIS DE TELECOMMUNICATIONS", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
 
-  // Abonnements SaaS
-  "CAPCUT":           { account: "60640000", label: "FOURNITURES DE BUREAU", confidence: 0.97, checkImmobilization: false, journalCode: "AC" },
-  "SKELLO":           { account: "61350100", label: "SKELLO", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
-  "INEXWEB":          { account: "61357000", label: "INEXWEB", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
-  "DROPBOX":          { account: "60640000", label: "FOURNITURES DE BUREAU", confidence: 0.97, checkImmobilization: false, journalCode: "AC" },
-  "OPENAI":           { account: "60640000", label: "FOURNITURES DE BUREAU", confidence: 0.95, checkImmobilization: false, journalCode: "AC" },
-  "ANTHROPIC":        { account: "60640000", label: "FOURNITURES DE BUREAU", confidence: 0.95, checkImmobilization: false, journalCode: "AC" },
-  "ADOBE":            { account: "60640000", label: "FOURNITURES DE BUREAU", confidence: 0.97, checkImmobilization: false, journalCode: "AC" },
-  "CANVA":            { account: "60640000", label: "FOURNITURES DE BUREAU", confidence: 0.97, checkImmobilization: false, journalCode: "AC" },
-  "CLAUDE":           { account: "60640000", label: "FOURNITURES DE BUREAU", confidence: 0.95, checkImmobilization: false, journalCode: "AC" },
+  // Hébergement web / Cloud
+  "NETLIFY":          { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "VERCEL":           { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "OVH":              { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "AWS":              { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "AMAZON WEB":       { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "GOOGLE CLOUD":     { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "GOOGLE ONE":       { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "DROPBOX":          { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "IONOS":            { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "WIX":              { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "HOSTINGER":        { account: "61350200", label: "HEBERGEMENT WEB ET CLOUD", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "WORLDLINE":        { account: "62781000", label: "COMMISSIONS CB", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+
+  // Logiciels RH
+  "SKELLO":           { account: "61350100", label: "LOCATIONS LOGICIELS RH", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+
+  // Honoraires comptables
+  "INEXWEB":          { account: "61357000", label: "HONORAIRES COMPTABLES", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "IN EXTENSO":       { account: "62261000", label: "HONORAIRES COMPTABLES", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+
+  // Logiciels bureautique / IA
+  "OPENAI":           { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "ANTHROPIC":        { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "CLAUDE":           { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "CHATGPT":          { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "ADOBE":            { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "CANVA":            { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "CAPCUT":           { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "MICROSOFT":        { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "GOOGLE WORKSPACE": { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "GENSPARK":         { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "ELEVENLABS":       { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "RINGOVER":         { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "MAILJET":          { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+
+  // Logiciels métier (réservation/gestion)
+  "FUNBOOKER":        { account: "61350300", label: "LOCATIONS LOGICIELS METIER", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  "SMOOBU":           { account: "61350300", label: "LOCATIONS LOGICIELS METIER", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+
+  // Livraisons repas / staff meals
+  "UBER EATS":        { account: "62560000", label: "REPAS PERSONNEL", confidence: 0.97, checkImmobilization: false, journalCode: "AC" },
+  "DELIVEROO":        { account: "62560000", label: "REPAS PERSONNEL", confidence: 0.97, checkImmobilization: false, journalCode: "AC" },
+  "3MINUTESPIZZ":     { account: "62560000", label: "REPAS PERSONNEL", confidence: 0.97, checkImmobilization: false, journalCode: "AC" },
 
   // Véhicule
   "DIAC":             { account: "61353000", label: "DIAC LOCATION JOGGER", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },

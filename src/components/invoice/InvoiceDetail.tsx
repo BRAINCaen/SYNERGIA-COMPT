@@ -191,6 +191,25 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     }
   }
 
+  // Learn supplier rule from manual correction so future invoices auto-classify
+  const learnSupplierRule = async (pcgCode: string, pcgLabel: string, journalCode?: string) => {
+    if (!invoice?.supplier_name) return
+    try {
+      await authFetch('/api/supplier-rules', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          supplier_name: invoice.supplier_name,
+          pcg_code: pcgCode,
+          pcg_label: pcgLabel,
+          journal_code: journalCode,
+        }),
+      })
+    } catch (e) {
+      console.error('Learn rule error:', e)
+    }
+  }
+
   const updateLine = (index: number, pcgCode: string, pcgLabel: string) => {
     const line = lines[index]
     setLines((prev) =>
@@ -200,6 +219,8 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     )
     // Auto-save immediately
     autoSaveLine(line?.id, { pcg_code: pcgCode, pcg_label: pcgLabel, manually_corrected: true })
+    // Learn for this supplier — future invoices will auto-classify
+    learnSupplierRule(pcgCode, pcgLabel, line?.journal_code || undefined)
   }
 
   const updateJournal = (index: number, journalCode: string) => {
@@ -209,6 +230,10 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     )
     // Auto-save immediately
     autoSaveLine(line?.id, { journal_code: journalCode })
+    // Update supplier rule journal if PCG already set
+    if (line?.pcg_code) {
+      learnSupplierRule(line.pcg_code, line.pcg_label || '', journalCode)
+    }
   }
 
   const toggleImmobilization = (index: number) => {

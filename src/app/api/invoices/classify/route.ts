@@ -4,6 +4,8 @@ import type { ClassificationResult, ExtractedLine } from '@/types'
 import { BOEHME_PCG, IMMOBILIZATION_THRESHOLD_HT } from '@/data/boehme-pcg'
 import { findKnownSupplier, AMORTIZATION_RATES } from '@/data/boehme-suppliers'
 import { getCorrectionsForSupplier } from '@/lib/audit'
+import { verifyAuth } from '@/lib/firebase/auth-helper'
+import { adminDb } from '@/lib/firebase/admin'
 
 export const dynamic = 'force-dynamic'
 
