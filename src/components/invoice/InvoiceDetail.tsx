@@ -1142,6 +1142,17 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                       onClick={async () => {
                         setBankMatching(true)
                         try {
+                          // Capture the newly matched transactions BEFORE we clear them
+                          const newlyMatched = bankTransactions
+                            .filter((t: any) => selectedBankTxIds.includes(t.id))
+                            .map((t: any) => ({
+                              id: t.id,
+                              statement_id: t.statement_id,
+                              date: t.date,
+                              label: t.label,
+                              amount: t.amount,
+                              type: t.type,
+                            }))
                           for (const txId of selectedBankTxIds) {
                             const tx = bankTransactions.find((t: any) => t.id === txId)
                             if (!tx) continue
@@ -1151,6 +1162,8 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                               body: JSON.stringify({ transaction_id: txId, invoice_id: invoiceId }),
                             })
                           }
+                          // Update matched details directly for instant UI feedback
+                          setMatchedTxDetails(prev => [...prev, ...newlyMatched])
                           setBankMatched('multi')
                           setBankMatchCount(prev => prev + selectedBankTxIds.length)
                           setShowBankMatch(false)
