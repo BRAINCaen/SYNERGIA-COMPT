@@ -434,8 +434,7 @@ export default function RevenueDetail({ revenueId }: { revenueId: string }) {
               </div>
             </div>
             )
-          })()
-          )}
+          })()}
         </div>
       )}
 

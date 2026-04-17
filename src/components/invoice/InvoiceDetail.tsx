@@ -561,9 +561,20 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     setSavingAmounts(false)
   }
 
+  // Keep raw string during edit so user can type "180," then add decimals.
+  // Stored as number on blur/save.
+  const [editRawValues, setEditRawValues] = useState<Record<string, string>>({})
+
   const handleAmountChange = (field: 'total_ht' | 'total_tva' | 'total_ttc', value: string) => {
-    const parsed = value === '' ? null : parseFloat(value.replace(',', '.'))
-    setEditAmounts((prev) => ({ ...prev, [field]: parsed }))
+    // Allow: digits, comma, dot, minus sign. Remove spaces.
+    const cleaned = value.replace(/\s/g, '').replace(/[^\d.,\-]/g, '')
+    setEditRawValues(prev => ({ ...prev, [field]: cleaned }))
+    // Parse for the state but accept trailing comma/dot
+    const normalized = cleaned.replace(',', '.')
+    const parsed = cleaned === '' || cleaned === '-' ? null : parseFloat(normalized)
+    if (!isNaN(parsed as number) || parsed === null) {
+      setEditAmounts((prev) => ({ ...prev, [field]: parsed }))
+    }
     setAmountsModified(true)
   }
 
@@ -601,19 +612,28 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
           <div className="mt-1">
             <input
               type="text"
+              inputMode="decimal"
               autoFocus
-              value={value != null ? String(value) : ''}
+              value={editRawValues[field] !== undefined ? editRawValues[field] : (value != null ? String(value).replace('.', ',') : '')}
               onChange={(e) => handleAmountChange(field, e.target.value)}
-              onBlur={stopEditing}
+              onBlur={() => {
+                // Clear raw value on blur (commit)
+                setEditRawValues(prev => { const n = { ...prev }; delete n[field]; return n })
+                stopEditing()
+              }}
               onKeyDown={(e) => {
-                if (e.key === 'Enter') stopEditing()
+                if (e.key === 'Enter') {
+                  setEditRawValues(prev => { const n = { ...prev }; delete n[field]; return n })
+                  stopEditing()
+                }
                 if (e.key === 'Escape') {
+                  setEditRawValues(prev => { const n = { ...prev }; delete n[field]; return n })
                   setEditAmounts((prev) => ({ ...prev, [field]: invoice[field] }))
                   setEditingField(null)
                 }
               }}
               className="w-full rounded-lg border border-accent-green/50 bg-dark-input px-2 py-1 text-lg font-bold font-mono text-white focus:border-accent-green focus:outline-none focus:ring-1 focus:ring-accent-green/50"
-              placeholder="0.00"
+              placeholder="0,00"
             />
           </div>
         ) : (
