@@ -35,7 +35,14 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [altLoading, setAltLoading] = useState(false)
   const [alternatives, setAlternatives] = useState<Array<{ pcg_code: string; pcg_label: string; journal_code: string; confidence: number; reasoning: string }>>([])
   const [altUserContext, setAltUserContext] = useState('')
-  const [allInvoiceIds, setAllInvoiceIds] = useState<string[]>([])
+  const [allInvoiceIds, setAllInvoiceIds] = useState<string[]>(() => {
+    // Read cached list from sessionStorage for instant render
+    if (typeof window === 'undefined') return []
+    try {
+      const cached = sessionStorage.getItem('invNav.ids')
+      return cached ? JSON.parse(cached) : []
+    } catch { return [] }
+  })
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showBankMatch, setShowBankMatch] = useState(false)
   const [bankTransactions, setBankTransactions] = useState<any[]>([])
@@ -68,27 +75,53 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [invoiceId, user])
 
-  // Load all invoice IDs for prev/next navigation (sorted by date desc, same as list)
+  // Load all invoice IDs for prev/next navigation (cached in sessionStorage)
   useEffect(() => {
     if (!user) return
+    // Check cache age — refresh only every 2 minutes
+    const cacheTime = typeof window !== 'undefined' ? Number(sessionStorage.getItem('invNav.ts') || 0) : 0
+    const isCacheFresh = cacheTime && Date.now() - cacheTime < 120_000
+    if (isCacheFresh && allInvoiceIds.length > 0) return // skip fetch
+
     const loadIds = async () => {
       try {
         const res = await authFetch('/api/invoices')
         if (res.ok) {
           const data = await res.json()
-          // Same sort as InvoiceList: by invoice_date or created_at desc
           const sorted = [...data].sort((a: { invoice_date?: string; created_at?: string }, b: { invoice_date?: string; created_at?: string }) => {
             const da = new Date(a.invoice_date || a.created_at || 0).getTime()
             const db = new Date(b.invoice_date || b.created_at || 0).getTime()
             return db - da
           })
-          setAllInvoiceIds(sorted.map((inv: { id: string }) => inv.id))
+          const ids = sorted.map((inv: { id: string }) => inv.id)
+          setAllInvoiceIds(ids)
+          // Cache
+          if (typeof window !== 'undefined') {
+            sessionStorage.setItem('invNav.ids', JSON.stringify(ids))
+            sessionStorage.setItem('invNav.ts', String(Date.now()))
+          }
         }
       } catch { /* */ }
     }
     loadIds()
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user])
+
+  // Prefetch adjacent invoices for instant navigation
+  useEffect(() => {
+    if (!user || allInvoiceIds.length === 0) return
+    const idx = allInvoiceIds.indexOf(invoiceId)
+    if (idx < 0) return
+    const prevIdPrefetch = idx > 0 ? allInvoiceIds[idx - 1] : null
+    const nextIdPrefetch = idx < allInvoiceIds.length - 1 ? allInvoiceIds[idx + 1] : null
+    // Fire-and-forget fetches that populate Next.js router cache for instant page loads
+    if (prevIdPrefetch) router.prefetch(`/invoices/${prevIdPrefetch}`)
+    if (nextIdPrefetch) router.prefetch(`/invoices/${nextIdPrefetch}`)
+    // Also prefetch the API data (warms the Firebase/Netlify function cache)
+    if (prevIdPrefetch) authFetch(`/api/invoices/${prevIdPrefetch}`).catch(() => {})
+    if (nextIdPrefetch) authFetch(`/api/invoices/${nextIdPrefetch}`).catch(() => {})
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [invoiceId, allInvoiceIds, user])
 
   const currentIdx = allInvoiceIds.indexOf(invoiceId)
   const prevId = currentIdx > 0 ? allInvoiceIds[currentIdx - 1] : null
