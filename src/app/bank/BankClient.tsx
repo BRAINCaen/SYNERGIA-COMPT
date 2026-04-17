@@ -577,7 +577,47 @@ export default function BankClient() {
         {/* Statements list */}
         {statements.length > 0 ? (
           <div className="space-y-4">
-            <h2 className="text-lg font-semibold text-white">Releves importes</h2>
+            <div className="flex items-center justify-between">
+              <h2 className="text-lg font-semibold text-white">Releves importes</h2>
+              <button
+                onClick={async () => {
+                  try {
+                    // First a dry run to count
+                    const dryRes = await authFetch('/api/bank-statements/deduplicate-transactions', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ dry_run: true }),
+                    })
+                    if (!dryRes.ok) { alert('Erreur'); return }
+                    const dryData = await dryRes.json()
+                    if (dryData.duplicates_found === 0) {
+                      alert('Aucune transaction en double detectee')
+                      return
+                    }
+                    const examples = (dryData.examples || []).slice(0, 5).join('\n- ')
+                    const ok = confirm(
+                      `${dryData.duplicates_found} transaction(s) bancaire(s) en double detectee(s) :\n\n- ${examples}\n\n` +
+                      `Les transactions DEJA RAPPROCHEES sont preservees.\n\nSupprimer les doublons non-rapproches ?`
+                    )
+                    if (!ok) return
+                    const res = await authFetch('/api/bank-statements/deduplicate-transactions', {
+                      method: 'POST',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ dry_run: false }),
+                    })
+                    if (res.ok) {
+                      const data = await res.json()
+                      alert(`${data.deleted} transaction(s) en double supprimee(s)`)
+                      window.location.reload()
+                    }
+                  } catch { alert('Erreur') }
+                }}
+                className="flex items-center gap-1.5 rounded-lg border border-accent-orange/50 px-3 py-1.5 text-xs font-medium text-accent-orange hover:bg-accent-orange/10 transition-colors"
+                title="Detecter et supprimer les transactions en double (relevé uploadé 2x)"
+              >
+                Nettoyer doublons transactions
+              </button>
+            </div>
             <div className="space-y-3">
               {statements.map((st) => (
                 <div
