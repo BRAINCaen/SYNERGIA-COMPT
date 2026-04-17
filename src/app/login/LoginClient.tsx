@@ -23,12 +23,18 @@ export default function LoginClient() {
     setError(null)
 
     try {
-      if (mode === 'login') {
-        await signInWithEmailAndPassword(auth, email, password)
-      } else {
-        await createUserWithEmailAndPassword(auth, email, password)
-      }
-      router.push('/')
+      const credential = mode === 'login'
+        ? await signInWithEmailAndPassword(auth, email, password)
+        : await createUserWithEmailAndPassword(auth, email, password)
+
+      // Set the auth cookie IMMEDIATELY before redirecting to avoid
+      // middleware race condition (was redirecting back to /login)
+      const token = await credential.user.getIdToken()
+      document.cookie = `firebase-auth-token=${token}; path=/; max-age=${60 * 60 * 24 * 7}; SameSite=Lax`
+
+      // Hard navigation to ensure the middleware sees the new cookie
+      window.location.href = '/'
+      return
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : 'Une erreur est survenue'
       if (message.includes('wrong-password') || message.includes('invalid-credential')) {
