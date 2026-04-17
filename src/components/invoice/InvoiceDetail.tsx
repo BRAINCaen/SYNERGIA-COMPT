@@ -167,18 +167,48 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
     setTogglingAutoClassify(false)
   }
 
+  const [autoSaveStatus, setAutoSaveStatus] = useState<'idle' | 'saving' | 'saved' | 'error'>('idle')
+
+  // Auto-save a single line change directly to Firestore (no validate required)
+  const autoSaveLine = async (lineId: string | undefined, updates: Record<string, unknown>) => {
+    if (!lineId) return
+    setAutoSaveStatus('saving')
+    try {
+      const res = await authFetch(`/api/invoices/${invoiceId}/lines/${lineId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(updates),
+      })
+      if (res.ok) {
+        setAutoSaveStatus('saved')
+        setTimeout(() => setAutoSaveStatus('idle'), 2000)
+      } else {
+        setAutoSaveStatus('error')
+      }
+    } catch (e) {
+      console.error('Auto-save line error:', e)
+      setAutoSaveStatus('error')
+    }
+  }
+
   const updateLine = (index: number, pcgCode: string, pcgLabel: string) => {
+    const line = lines[index]
     setLines((prev) =>
       prev.map((l, i) =>
         i === index ? { ...l, pcg_code: pcgCode, pcg_label: pcgLabel, isEdited: true, manually_corrected: true } : l
       )
     )
+    // Auto-save immediately
+    autoSaveLine(line?.id, { pcg_code: pcgCode, pcg_label: pcgLabel, manually_corrected: true })
   }
 
   const updateJournal = (index: number, journalCode: string) => {
+    const line = lines[index]
     setLines((prev) =>
       prev.map((l, i) => (i === index ? { ...l, journal_code: journalCode, isEdited: true } : l))
     )
+    // Auto-save immediately
+    autoSaveLine(line?.id, { journal_code: journalCode })
   }
 
   const toggleImmobilization = (index: number) => {
