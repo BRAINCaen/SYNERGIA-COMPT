@@ -915,9 +915,6 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
               <button
                 onClick={async () => {
                   const newState = !isLocked
-                  if (newState) {
-                    if (!confirm('Verrouiller ce rapprochement ?\n\nLes transactions ne pourront plus etre decochees accidentellement. Utile quand le pointage est definitif.')) return
-                  }
                   try {
                     await authFetch(`/api/invoices/${invoiceId}`, {
                       method: 'PATCH',
