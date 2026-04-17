@@ -815,7 +815,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                               // Fallback: navigate to the document page
                               const path =
                                 type === 'invoice' ? `/invoices/${id}` :
-                                type === 'revenue' ? `/revenue?id=${id}` :
+                                type === 'revenue' ? `/revenue/${id}` :
                                 `/personnel?payslip=${id}`
                               router.push(path)
                             }}
