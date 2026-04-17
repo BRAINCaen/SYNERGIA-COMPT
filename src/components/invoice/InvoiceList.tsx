@@ -606,6 +606,27 @@ export default function InvoiceList() {
           </button>
           <button
             onClick={async () => {
+              if (!confirm('Corriger tous les libelles comptables (SKELLO → LOCATIONS LOGICIELS RH, etc.) ?')) return
+              setRenaming(true)
+              setRenameResult(null)
+              try {
+                const res = await authFetch('/api/invoices/fix-labels', { method: 'POST' })
+                if (res.ok) {
+                  const data = await res.json()
+                  setRenameResult(`${data.updated} libelle(s) corrige(s)`)
+                }
+              } catch { setRenameResult('Erreur') }
+              setRenaming(false)
+            }}
+            disabled={renaming || batchScanning}
+            className="flex items-center gap-1.5 rounded-lg border border-purple-500/50 px-3 py-1.5 text-xs text-purple-400 hover:bg-purple-500/10 transition-colors disabled:opacity-50"
+            title="Corriger les libelles PCG obsoletes (noms de fournisseurs -> libelles officiels)"
+          >
+            {renaming ? <Loader2 className="h-3.5 w-3.5 animate-spin" /> : <RefreshCw className="h-3.5 w-3.5" />}
+            Corriger libelles
+          </button>
+          <button
+            onClick={async () => {
               if (!confirm('Supprimer les factures en double (meme fournisseur + montant + numero) ?')) return
               setDeduplicating(true)
               setDedupeResult(null)
