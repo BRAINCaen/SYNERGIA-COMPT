@@ -52,6 +52,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [matchedTxDetails, setMatchedTxDetails] = useState<any[]>([])
   const [selectedBankTxIds, setSelectedBankTxIds] = useState<string[]>([])
   const [bankMatching, setBankMatching] = useState(false)
+  const [includeMatchedTx, setIncludeMatchedTx] = useState(false)
 
   // Supplier auto-classify
   const [supplierId, setSupplierId] = useState<string | null>(null)
@@ -150,7 +151,10 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
         if (txRes.ok) {
           const txData = await txRes.json()
           const txs = txData.transactions || txData || []
-          const matchedTxs = txs.filter((tx: any) => tx.matched_invoice_id === invoiceId)
+          const matchedTxs = txs.filter((tx: any) =>
+            tx.matched_invoice_id === invoiceId ||
+            (Array.isArray(tx.additional_invoice_ids) && tx.additional_invoice_ids.includes(invoiceId))
+          )
           setBankMatchCount(matchedTxs.length)
           setMatchedTxDetails(matchedTxs)
           if (matchedTxs.length > 0) setBankMatched('existing')
@@ -867,10 +871,18 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
               setShowBankMatch(true)
               setBankSearching(true)
               try {
-                const res = await authFetch('/api/bank-statements/transactions?match_status=unmatched')
+                const url = includeMatchedTx
+                  ? '/api/bank-statements/transactions'
+                  : '/api/bank-statements/transactions?match_status=unmatched'
+                const res = await authFetch(url)
                 if (res.ok) {
                   const data = await res.json()
-                  setBankTransactions(data.transactions || data || [])
+                  // Filter out transactions already linked to THIS invoice
+                  const txs = (data.transactions || data || []).filter((tx: any) =>
+                    tx.matched_invoice_id !== invoiceId &&
+                    !(Array.isArray(tx.additional_invoice_ids) && tx.additional_invoice_ids.includes(invoiceId))
+                  )
+                  setBankTransactions(txs)
                 }
               } catch (e) {
                 console.error('Fetch bank transactions error:', e)
@@ -1082,6 +1094,39 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                   />
                 </div>
 
+                {/* Toggle: include already-matched transactions */}
+                <label className="flex items-center gap-2 cursor-pointer text-xs">
+                  <input
+                    type="checkbox"
+                    checked={includeMatchedTx}
+                    onChange={async () => {
+                      const newVal = !includeMatchedTx
+                      setIncludeMatchedTx(newVal)
+                      setBankSearching(true)
+                      try {
+                        const url = newVal
+                          ? '/api/bank-statements/transactions'
+                          : '/api/bank-statements/transactions?match_status=unmatched'
+                        const res = await authFetch(url)
+                        if (res.ok) {
+                          const data = await res.json()
+                          const txs = (data.transactions || data || []).filter((tx: any) =>
+                            tx.matched_invoice_id !== invoiceId &&
+                            !(Array.isArray(tx.additional_invoice_ids) && tx.additional_invoice_ids.includes(invoiceId))
+                          )
+                          setBankTransactions(txs)
+                        }
+                      } catch { /* */ }
+                      setBankSearching(false)
+                    }}
+                    className="h-3.5 w-3.5 rounded border-dark-border bg-dark-input text-accent-orange focus:ring-accent-orange/50"
+                  />
+                  <span className="text-gray-400">
+                    Inclure les transactions <strong className="text-accent-orange">deja rapprochees a d&apos;autres factures</strong>
+                  </span>
+                  <span className="text-gray-600 italic">(utile pour un virement groupe / prelevement couvrant plusieurs factures)</span>
+                </label>
+
                 {matchingTx.length > 0 && (
                   <p className="text-xs font-medium text-accent-green">
                     {matchingTx.length} transaction(s) avec montant exact (+/- 0.01€)
@@ -1113,7 +1158,14 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                           className="h-4 w-4 rounded border-dark-border bg-dark-input text-accent-green focus:ring-accent-green/50"
                         />
                         <div className="min-w-0 flex-1">
-                          <p className="truncate text-sm text-gray-200">{tx.label}</p>
+                          <div className="flex items-center gap-2">
+                            <p className="truncate text-sm text-gray-200">{tx.label}</p>
+                            {tx.match_status === 'matched' && (
+                              <span className="shrink-0 rounded bg-accent-orange/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent-orange" title="Deja rapprochee a une autre facture">
+                                Deja liee
+                              </span>
+                            )}
+                          </div>
                           <p className="text-xs text-gray-500 font-mono">
                             {tx.date ? new Date(tx.date).toLocaleDateString('fr-FR') : '-'}
                           </p>

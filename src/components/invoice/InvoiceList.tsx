@@ -216,6 +216,8 @@ export default function InvoiceList() {
           for (const tx of txs) {
             if (tx.matched_invoice_id) ids.add(tx.matched_invoice_id)
             if (tx.matched_revenue_id) ids.add(tx.matched_revenue_id)
+            if (Array.isArray(tx.additional_invoice_ids)) tx.additional_invoice_ids.forEach((id: string) => ids.add(id))
+            if (Array.isArray(tx.additional_revenue_ids)) tx.additional_revenue_ids.forEach((id: string) => ids.add(id))
           }
           setMatchedInvoiceIds(ids)
         }
