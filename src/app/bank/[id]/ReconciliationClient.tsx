@@ -784,19 +784,46 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                         <p className="truncate">{tx.label}</p>
                         {tx.status === 'matched' && tx.matched_entity ? (
                           <button
-                            onClick={() => {
+                            onClick={async () => {
                               const type = tx.matched_entity!.type
+                              const id = tx.matched_entity!.id
+                              // Try to fetch the document's file_path and open PDF directly
+                              try {
+                                let apiPath = ''
+                                if (type === 'invoice') apiPath = `/api/invoices/${id}`
+                                else if (type === 'revenue') apiPath = `/api/revenue/${id}`
+                                else if (type === 'payslip') apiPath = `/api/payslips/${id}`
+
+                                const res = await authFetch(apiPath)
+                                if (res.ok) {
+                                  const data = await res.json()
+                                  const filePath = data.file_path
+                                  if (filePath) {
+                                    // Fetch PDF via proxy and open blob in new tab
+                                    const pdfRes = await authFetch(`/api/proxy-pdf?path=${encodeURIComponent(filePath)}`)
+                                    if (pdfRes.ok) {
+                                      const blob = await pdfRes.blob()
+                                      const url = URL.createObjectURL(blob)
+                                      window.open(url, '_blank')
+                                      return
+                                    }
+                                  }
+                                }
+                              } catch (e) {
+                                console.error('Open document error:', e)
+                              }
+                              // Fallback: navigate to the document page
                               const path =
-                                type === 'invoice' ? `/invoices/${tx.matched_entity!.id}` :
-                                type === 'revenue' ? `/revenue?id=${tx.matched_entity!.id}` :
-                                `/personnel?payslip=${tx.matched_entity!.id}`
+                                type === 'invoice' ? `/invoices/${id}` :
+                                type === 'revenue' ? `/revenue?id=${id}` :
+                                `/personnel?payslip=${id}`
                               router.push(path)
                             }}
                             className="mt-0.5 flex items-center gap-1 text-xs text-accent-green hover:underline"
                             title={
-                              tx.matched_entity.type === 'invoice' ? 'Voir la facture' :
-                              tx.matched_entity.type === 'revenue' ? 'Voir l\'encaissement' :
-                              'Voir le bulletin de paie'
+                              tx.matched_entity.type === 'invoice' ? 'Voir le PDF de la facture' :
+                              tx.matched_entity.type === 'revenue' ? 'Voir le PDF de l\'encaissement' :
+                              'Voir le PDF du bulletin de paie'
                             }
                           >
                             <FileText className="h-3 w-3" />
