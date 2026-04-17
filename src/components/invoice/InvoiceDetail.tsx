@@ -34,6 +34,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [altLineIdx, setAltLineIdx] = useState<number | null>(null)
   const [altLoading, setAltLoading] = useState(false)
   const [alternatives, setAlternatives] = useState<Array<{ pcg_code: string; pcg_label: string; journal_code: string; confidence: number; reasoning: string }>>([])
+  const [altUserContext, setAltUserContext] = useState('')
   const [allInvoiceIds, setAllInvoiceIds] = useState<string[]>([])
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false)
   const [showBankMatch, setShowBankMatch] = useState(false)
@@ -1295,6 +1296,15 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                         <option value="OD">OD</option>
                       </select>
                     </div>
+                    {!line.pcg_code && (
+                      <button
+                        onClick={() => { setAltLineIdx(index); setAltUserContext(''); setAlternatives([]) }}
+                        className="flex items-center gap-1.5 rounded-lg border border-accent-orange/50 bg-accent-orange/5 px-3 py-1.5 text-xs font-medium text-accent-orange hover:bg-accent-orange/15 transition-colors"
+                      >
+                        <Lightbulb className="h-3.5 w-3.5" />
+                        Je ne sais pas — demander des propositions a l&apos;IA
+                      </button>
+                    )}
                     {line.isEdited && (
                       <div className="flex items-center gap-1 text-xs text-accent-green"><Save className="h-3 w-3" />Modifie</div>
                     )}
@@ -1335,13 +1345,71 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
               </div>
             </div>
 
+            {/* User context input - always visible, lets user describe the situation */}
+            <div className="mb-4 rounded-lg border border-dark-border bg-dark-input p-3">
+              <label className="mb-1.5 block text-xs font-medium text-gray-400">
+                Decris la situation (optionnel) — l&apos;IA en tiendra compte :
+              </label>
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={altUserContext}
+                  onChange={(e) => setAltUserContext(e.target.value)}
+                  placeholder="ex: repas offert a un salarie, achat pour le bureau, livraison pour un client..."
+                  className="flex-1 rounded-lg border border-dark-border bg-dark-card px-3 py-2 text-sm text-gray-200 placeholder-gray-600 focus:border-accent-orange focus:outline-none"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      (document.getElementById('ask-btn') as HTMLButtonElement)?.click()
+                    }
+                  }}
+                />
+                <button
+                  id="ask-btn"
+                  onClick={async () => {
+                    if (altLineIdx === null) return
+                    setAltLoading(true)
+                    setAlternatives([])
+                    try {
+                      const res = await authFetch('/api/invoices/suggest-alternatives', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify({
+                          description: lines[altLineIdx]?.description,
+                          supplier_name: invoice?.supplier_name,
+                          total_ht: lines[altLineIdx]?.total_ht,
+                          current_pcg_code: lines[altLineIdx]?.pcg_code,
+                          document_type: invoice?.document_type,
+                          user_context: altUserContext.trim() || undefined,
+                        }),
+                      })
+                      if (res.ok) {
+                        const data = await res.json()
+                        setAlternatives(data.alternatives || [])
+                      }
+                    } catch { /* */ }
+                    setAltLoading(false)
+                  }}
+                  disabled={altLoading}
+                  className="flex items-center gap-1.5 rounded-lg bg-accent-orange px-4 py-2 text-sm font-bold text-dark-bg hover:bg-accent-orange/90 disabled:opacity-50"
+                >
+                  {altLoading ? <Loader2 className="h-4 w-4 animate-spin" /> : <Lightbulb className="h-4 w-4" />}
+                  Demander
+                </button>
+              </div>
+              <p className="mt-1.5 text-xs text-gray-600">
+                Exemples : &quot;repas offert à un salarié&quot;, &quot;cadeau pour un client&quot;, &quot;achat materiel pour le bureau&quot;, &quot;formation&quot;...
+              </p>
+            </div>
+
             {altLoading ? (
               <div className="flex flex-col items-center justify-center py-12">
                 <Loader2 className="mb-3 h-8 w-8 animate-spin text-accent-orange" />
-                <p className="text-sm text-gray-400">L&apos;IA analyse d&apos;autres comptes possibles...</p>
+                <p className="text-sm text-gray-400">L&apos;IA analyse les comptes possibles...</p>
               </div>
             ) : alternatives.length === 0 ? (
-              <p className="py-8 text-center text-sm text-gray-500">Aucune alternative trouvee.</p>
+              <p className="py-8 text-center text-sm text-gray-500">
+                Tape une description et clique <strong className="text-accent-orange">Demander</strong> pour obtenir des propositions.
+              </p>
             ) : (
               <div className="space-y-2">
                 {alternatives.map((alt, i) => (

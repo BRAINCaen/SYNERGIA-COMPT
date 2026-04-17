@@ -18,12 +18,13 @@ export async function POST(request: NextRequest) {
     }
 
     const body = await request.json()
-    const { description, supplier_name, total_ht, current_pcg_code, document_type } = body as {
+    const { description, supplier_name, total_ht, current_pcg_code, document_type, user_context } = body as {
       description: string
       supplier_name?: string
       total_ht?: number
       current_pcg_code?: string
       document_type?: 'expense' | 'revenue'
+      user_context?: string
     }
 
     if (!description) {
@@ -37,7 +38,7 @@ Contexte :
 - Description de la ligne : "${description}"
 - Montant HT : ${total_ht || 'inconnu'} EUR
 - Type : ${document_type || 'expense'}
-- Classification actuelle : ${current_pcg_code || 'aucune'} (l'utilisateur n'est PAS d'accord)
+- Classification actuelle : ${current_pcg_code || 'aucune'}${user_context ? `\n- INFO IMPORTANTE de l'utilisateur : "${user_context}" — prends ça en priorite pour decider du bon compte` : ''}
 
 L'utilisateur conteste la classification actuelle. Propose 4 alternatives les plus pertinentes parmi le plan comptable BOEHME ci-dessous.
 
