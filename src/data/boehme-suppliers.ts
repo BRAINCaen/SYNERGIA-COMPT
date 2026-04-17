@@ -53,8 +53,7 @@ export const KNOWN_SUPPLIERS: Record<string, KnownSupplier> = {
   "RINGOVER":         { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
   "MAILJET":          { account: "61350400", label: "LOCATIONS LOGICIELS BUREAUTIQUE", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
 
-  // Logiciels métier (réservation/gestion)
-  "FUNBOOKER":        { account: "61350300", label: "LOCATIONS LOGICIELS METIER", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
+  // Logiciels métier (réservation/gestion) — FUNBOOKER est une commission (voir plus bas 62788000)
   "SMOOBU":           { account: "61350300", label: "LOCATIONS LOGICIELS METIER", confidence: 0.99, checkImmobilization: false, journalCode: "AC" },
 
   // Livraisons repas / staff meals
