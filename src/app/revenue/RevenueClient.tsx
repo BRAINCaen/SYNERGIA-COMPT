@@ -620,7 +620,13 @@ export default function RevenueClient() {
                       <React.Fragment key={entry.id}>
                         <tr
                           id={`revenue-entry-${entry.id}`}
-                          className={`border-b border-dark-border/50 hover:bg-dark-hover/30 ${isHighlighted ? 'bg-accent-green/10 animate-pulse' : ''}`}>
+                          onClick={(e) => {
+                            // Don't navigate if clicking on a button/link inside the row
+                            const target = e.target as HTMLElement
+                            if (target.closest('button') || target.closest('a')) return
+                            router.push(`/revenue/${entry.id}`)
+                          }}
+                          className={`border-b border-dark-border/50 hover:bg-dark-hover/30 cursor-pointer ${isHighlighted ? 'bg-accent-green/10 animate-pulse' : ''}`}>
                           <td className="whitespace-nowrap px-4 py-3 font-mono text-gray-200">
                             {formatDate(entry.date)}
                           </td>
