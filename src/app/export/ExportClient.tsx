@@ -48,7 +48,7 @@ export default function ExportClient() {
   const [revenue, setRevenue] = useState<RevenueEntry[]>([])
   const [payslips, setPayslips] = useState<Payslip[]>([])
   const [selected, setSelected] = useState<Set<string>>(new Set())
-  const [format, setFormat] = useState<ExportFormat>('fec')
+  const [formats, setFormats] = useState<Set<ExportFormat>>(new Set(['fec']))
   const [exportContent, setExportContent] = useState<ExportContent>('file_and_pdfs')
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
@@ -427,40 +427,48 @@ export default function ExportClient() {
 
       const needsFile = exportContent !== 'pdfs_only'
       const needsPdfs = exportContent !== 'file_only'
+      const formatsArr = Array.from(formats)
 
-      // Step 1: Get the FEC/CSV/JSON file from API
-      let fileBlob: Blob | null = null
-      let fileExt = format === 'fec' ? 'txt' : format
-
+      // Step 1: Fetch all selected format files from API
+      const fileBlobs: { format: ExportFormat; blob: Blob; ext: string }[] = []
       if (needsFile) {
-        setExportProgress('Generation du fichier comptable...')
-        const res = await authFetch('/api/export', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            invoice_ids: invoiceIds,
-            revenue_ids: revenueIds,
-            payslip_ids: payslipIds,
-            format,
-            month: selectedMonth,
-          }),
-        })
-
-        if (res.ok) {
-          fileBlob = await res.blob()
-        } else {
-          console.error('Export API error:', res.status)
+        for (const fmt of formatsArr) {
+          setExportProgress(`Generation du fichier ${fmt.toUpperCase()}...`)
+          const res = await authFetch('/api/export', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              invoice_ids: invoiceIds,
+              revenue_ids: revenueIds,
+              payslip_ids: payslipIds,
+              format: fmt,
+              month: selectedMonth,
+            }),
+          })
+          if (res.ok) {
+            fileBlobs.push({
+              format: fmt,
+              blob: await res.blob(),
+              ext: fmt === 'fec' ? 'txt' : fmt,
+            })
+          } else {
+            console.error(`Export ${fmt} error:`, res.status)
+          }
         }
       }
 
-      // If only file, just download it directly
-      if (exportContent === 'file_only' && fileBlob) {
-        const url = URL.createObjectURL(fileBlob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = `${format.toUpperCase()}_${selectedMonth}.${fileExt}`
-        a.click()
-        URL.revokeObjectURL(url)
+      // If only files (no PDFs), download them individually
+      if (exportContent === 'file_only' && fileBlobs.length > 0) {
+        for (const fb of fileBlobs) {
+          const url = URL.createObjectURL(fb.blob)
+          const a = document.createElement('a')
+          a.href = url
+          a.download = `${fb.format.toUpperCase()}_${selectedMonth}.${fb.ext}`
+          a.click()
+          URL.revokeObjectURL(url)
+          // Small delay between downloads to avoid browser blocking
+          await new Promise(r => setTimeout(r, 300))
+        }
         setExporting(false)
         setExportProgress('')
         return
@@ -471,9 +479,9 @@ export default function ExportClient() {
         const zip = new JSZip()
         const docsFolder = zip.folder('documents') || zip
 
-        // Add comptable file to ZIP
-        if (fileBlob && needsFile) {
-          zip.file(`${format.toUpperCase()}_${selectedMonth}.${fileExt}`, fileBlob)
+        // Add all comptable files to ZIP (root level)
+        for (const fb of fileBlobs) {
+          zip.file(`${fb.format.toUpperCase()}_${selectedMonth}.${fb.ext}`, fb.blob)
         }
 
         // Get selected docs that have files
@@ -540,7 +548,7 @@ export default function ExportClient() {
     { key: 'personnel', label: 'Personnel', icon: Users, count: filteredByMonth.filter((d) => d.type === 'payslip').length },
   ]
 
-  const formats: { value: ExportFormat; label: string; desc: string }[] = [
+  const formatOptions: { value: ExportFormat; label: string; desc: string }[] = [
     { value: 'fec', label: 'FEC', desc: 'Fichier des Ecritures Comptables (format legal)' },
     { value: 'csv', label: 'CSV', desc: 'Tableur compatible Excel (separateur ;)' },
     { value: 'json', label: 'JSON', desc: 'Format structure pour integration' },
@@ -617,15 +625,33 @@ export default function ExportClient() {
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
         {/* Format */}
         <div className="card">
-          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">Format d&apos;export</h2>
+          <h2 className="mb-3 text-sm font-semibold uppercase tracking-wider text-gray-500">
+            Format d&apos;export <span className="text-xs normal-case text-gray-600">(multi-selection)</span>
+          </h2>
           <div className="grid grid-cols-3 gap-2">
-            {formats.map((f) => (
-              <button key={f.value} onClick={() => setFormat(f.value)}
-                className={`rounded-lg border-2 p-3 text-left transition-colors ${format === f.value ? 'border-accent-green bg-accent-green/10' : 'border-dark-border hover:border-gray-500'}`}>
-                <p className="font-medium text-gray-200">{f.label}</p>
-                <p className="mt-1 text-xs text-gray-500">{f.desc}</p>
-              </button>
-            ))}
+            {formatOptions.map((f) => {
+              const isSelected = formats.has(f.value)
+              return (
+                <button key={f.value} onClick={() => {
+                  setFormats(prev => {
+                    const next = new Set(prev)
+                    if (next.has(f.value)) {
+                      if (next.size > 1) next.delete(f.value) // Keep at least one
+                    } else {
+                      next.add(f.value)
+                    }
+                    return next
+                  })
+                }}
+                  className={`relative rounded-lg border-2 p-3 text-left transition-colors ${isSelected ? 'border-accent-green bg-accent-green/10' : 'border-dark-border hover:border-gray-500'}`}>
+                  {isSelected && (
+                    <CheckSquare className="absolute right-2 top-2 h-4 w-4 text-accent-green" />
+                  )}
+                  <p className="font-medium text-gray-200">{f.label}</p>
+                  <p className="mt-1 text-xs text-gray-500">{f.desc}</p>
+                </button>
+              )
+            })}
           </div>
         </div>
 
