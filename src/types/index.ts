@@ -19,6 +19,7 @@ export interface Invoice {
   total_ttc: number | null
   currency: string
   status: InvoiceStatus
+  match_locked?: boolean
   raw_extraction: RawExtraction | null
   created_at: string
   updated_at: string

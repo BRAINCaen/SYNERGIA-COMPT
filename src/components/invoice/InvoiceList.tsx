@@ -1034,11 +1034,17 @@ function InvoiceTable({
               <td className="px-4 py-3 text-center">
                 <div className="flex items-center justify-center gap-1.5">
                   <StatusBadge status={invoice.status} />
-                  {matchedInvoiceIds && matchedInvoiceIds.has(invoice.id) ? (
+                  {invoice.match_locked && (
+                    <span title="Rapprochement verrouille (definitif)" className="inline-flex items-center rounded bg-accent-green/20 p-0.5">
+                      <Landmark className="h-3 w-3 text-accent-green" />
+                      <span className="ml-0.5 text-[9px] font-bold text-accent-green">🔒</span>
+                    </span>
+                  )}
+                  {!invoice.match_locked && matchedInvoiceIds && matchedInvoiceIds.has(invoice.id) ? (
                     <span title="Rapprochee avec le releve bancaire" className="inline-flex items-center rounded bg-accent-green/10 p-0.5">
                       <Landmark className="h-3 w-3 text-accent-green" />
                     </span>
-                  ) : (invoice.status === 'validated' || invoice.status === 'exported') ? (
+                  ) : !invoice.match_locked && (invoice.status === 'validated' || invoice.status === 'exported') ? (
                     <span title="Non rapprochee" className="inline-flex items-center rounded bg-accent-orange/10 p-0.5">
                       <Landmark className="h-3 w-3 text-accent-orange" />
                     </span>

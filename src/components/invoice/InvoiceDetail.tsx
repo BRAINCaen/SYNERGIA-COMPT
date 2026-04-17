@@ -6,7 +6,7 @@ import { useAuth, useAuthFetch } from '@/lib/firebase/auth-context'
 import { StatusBadge, ConfidenceBadge } from '@/components/ui/Badge'
 import PCGSelector from './PCGSelector'
 import {
-  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package, Landmark, Link, Search, X, Lightbulb, ChevronLeft, ChevronRight,
+  CheckCircle, Download, ArrowLeft, FileText, Loader2, Save, AlertTriangle, Trash2, Pencil, Zap, Package, Landmark, Link, Search, X, Lightbulb, ChevronLeft, ChevronRight, Lock, Unlock,
 } from 'lucide-react'
 import { PDFDocument, rgb, StandardFonts } from 'pdf-lib'
 import type { Invoice, InvoiceLine, PCGAccount } from '@/types'
@@ -896,16 +896,51 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
         const diff = Math.abs(txTotal - invoiceTotal)
         const isMatch = diff < 0.01
         const isClose = diff < 1
+        const isLocked = invoice?.match_locked === true
         return (
-        <div className="card space-y-3">
+        <div className={`card space-y-3 ${isLocked ? 'border-2 border-accent-green/50' : ''}`}>
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
-              <CheckCircle className="h-4 w-4 text-accent-green" />
+              {isLocked ? <Lock className="h-4 w-4 text-accent-green" /> : <CheckCircle className="h-4 w-4 text-accent-green" />}
               <span className="text-sm font-semibold text-accent-green">
                 {matchedTxDetails.length} transaction(s) rapprochee(s)
               </span>
+              {isLocked && (
+                <span className="rounded-full bg-accent-green/20 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider text-accent-green">
+                  Verrouille
+                </span>
+              )}
             </div>
-            <span className="text-xs text-gray-500">Cliquez &quot;Rapprocher +&quot; pour en ajouter</span>
+            <div className="flex items-center gap-2">
+              <button
+                onClick={async () => {
+                  const newState = !isLocked
+                  if (newState) {
+                    if (!confirm('Verrouiller ce rapprochement ?\n\nLes transactions ne pourront plus etre decochees accidentellement. Utile quand le pointage est definitif.')) return
+                  }
+                  try {
+                    await authFetch(`/api/invoices/${invoiceId}`, {
+                      method: 'PATCH',
+                      headers: { 'Content-Type': 'application/json' },
+                      body: JSON.stringify({ match_locked: newState }),
+                    })
+                    setInvoice((prev) => prev ? { ...prev, match_locked: newState } : prev)
+                  } catch (e) { console.error(e) }
+                }}
+                className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1 text-xs font-semibold transition-colors ${
+                  isLocked
+                    ? 'border-accent-orange/50 text-accent-orange hover:bg-accent-orange/10'
+                    : 'border-accent-green/50 text-accent-green hover:bg-accent-green/10'
+                }`}
+                title={isLocked ? 'Deverrouiller pour modifier' : 'Verrouiller ce rapprochement (empeche les modifications)'}
+              >
+                {isLocked ? <Unlock className="h-3 w-3" /> : <Lock className="h-3 w-3" />}
+                {isLocked ? 'Deverrouiller' : 'Verrouiller'}
+              </button>
+              {!isLocked && (
+                <span className="text-xs text-gray-500">Cliquez &quot;Rapprocher +&quot; pour en ajouter</span>
+              )}
+            </div>
           </div>
           {/* Total comparison */}
           <div className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
@@ -948,24 +983,28 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                   <span className={`font-mono text-sm font-medium ${tx.type === 'debit' ? 'text-accent-red' : 'text-accent-green'}`}>
                     {(tx.amount || 0).toLocaleString('fr-FR', { minimumFractionDigits: 2 })} €
                   </span>
-                  <button
-                    onClick={async () => {
-                      if (!confirm('Annuler ce rapprochement ?')) return
-                      try {
-                        await authFetch(`/api/bank-statements/${tx.statement_id}/match`, {
-                          method: 'DELETE',
-                          headers: { 'Content-Type': 'application/json' },
-                          body: JSON.stringify({ transaction_id: tx.id }),
-                        })
-                        setMatchedTxDetails(prev => prev.filter(t => t.id !== tx.id))
-                        setBankMatchCount(prev => prev - 1)
-                      } catch (e) { console.error('Unmatch error:', e) }
-                    }}
-                    className="rounded p-1 text-gray-500 hover:bg-accent-red/10 hover:text-accent-red transition-colors"
-                    title="Annuler ce rapprochement"
-                  >
-                    <X className="h-3.5 w-3.5" />
-                  </button>
+                  {!isLocked ? (
+                    <button
+                      onClick={async () => {
+                        if (!confirm('Annuler ce rapprochement ?')) return
+                        try {
+                          await authFetch(`/api/bank-statements/${tx.statement_id}/match`, {
+                            method: 'DELETE',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({ transaction_id: tx.id }),
+                          })
+                          setMatchedTxDetails(prev => prev.filter(t => t.id !== tx.id))
+                          setBankMatchCount(prev => prev - 1)
+                        } catch (e) { console.error('Unmatch error:', e) }
+                      }}
+                      className="rounded p-1 text-gray-500 hover:bg-accent-red/10 hover:text-accent-red transition-colors"
+                      title="Annuler ce rapprochement"
+                    >
+                      <X className="h-3.5 w-3.5" />
+                    </button>
+                  ) : (
+                    <Lock className="h-3.5 w-3.5 text-accent-green" />
+                  )}
                 </div>
               </div>
             ))}
