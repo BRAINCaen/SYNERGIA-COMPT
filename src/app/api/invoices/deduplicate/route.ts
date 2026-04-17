@@ -20,26 +20,40 @@ export async function POST(request: NextRequest) {
     const duplicateIds: string[] = []
     const duplicateDetails: string[] = []
 
+    // Normalize supplier name: uppercase, strip accents, remove parenthesized content + special chars
+    const normalizeSupplier = (s: string) =>
+      s.toUpperCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\([^)]*\)/g, '') // remove "(INPI)", "(S.A.P.N.)"
+        .replace(/[^A-Z0-9]/g, '')
+        .trim()
+
     for (const doc of snap.docs) {
       const data = doc.data()
 
-      // Build fingerprint from: supplier + invoice_number + total_ttc + invoice_date
-      const supplier = (data.supplier_name || '').toString().toUpperCase().trim()
-      const invoiceNum = (data.invoice_number || '').toString().trim()
+      const supplier = normalizeSupplier((data.supplier_name || '').toString())
+      const invoiceNum = (data.invoice_number || '').toString().trim().toUpperCase()
       const totalTtc = data.total_ttc != null ? Number(data.total_ttc).toFixed(2) : ''
       const date = (data.invoice_date || '').toString().slice(0, 7) // YYYY-MM
 
-      // Need at least 2 matching fields to consider duplicate
       if (!supplier && !invoiceNum) continue
 
-      const fingerprint = `${supplier}|${invoiceNum}|${totalTtc}|${date}`
+      // Strategy 1: STRONG match — invoice_number + total_ttc + date (same number + same amount + same month)
+      // Most reliable: two invoices with same number + amount + month = duplicate
+      const strongFingerprint = invoiceNum && totalTtc ? `INV|${invoiceNum}|${totalTtc}|${date}` : null
 
-      if (seen.has(fingerprint)) {
-        // This is a duplicate — keep the older one (first seen), delete this one
+      // Strategy 2: NORMALIZED supplier match — normalized supplier + invoice_number + amount + month
+      const normalizedFingerprint = supplier ? `SUP|${supplier}|${invoiceNum}|${totalTtc}|${date}` : null
+
+      const strongMatch = strongFingerprint && seen.has(strongFingerprint)
+      const normalizedMatch = normalizedFingerprint && seen.has(normalizedFingerprint)
+
+      if (strongMatch || normalizedMatch) {
         duplicateIds.push(doc.id)
-        duplicateDetails.push(`${data.file_name || doc.id} (${supplier} ${totalTtc}EUR ${invoiceNum})`)
+        duplicateDetails.push(`${data.file_name || doc.id} (${data.supplier_name || '?'} ${totalTtc}EUR ${invoiceNum})`)
       } else {
-        seen.set(fingerprint, { id: doc.id, created_at: data.created_at || '' })
+        if (strongFingerprint) seen.set(strongFingerprint, { id: doc.id, created_at: data.created_at || '' })
+        if (normalizedFingerprint) seen.set(normalizedFingerprint, { id: doc.id, created_at: data.created_at || '' })
       }
     }
 

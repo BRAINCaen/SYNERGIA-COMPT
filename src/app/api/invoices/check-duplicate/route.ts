@@ -15,47 +15,56 @@ export async function GET(request: NextRequest) {
     const totalTtc = searchParams.get('total_ttc')
     const invoiceDate = searchParams.get('invoice_date') // YYYY-MM-DD
 
-    if (!supplierName) {
+    if (!supplierName && !invoiceNumber) {
       return NextResponse.json({ isDuplicate: false })
     }
 
-    // Strategy: check supplier + amount + date (same month = potential duplicate)
-    // For recurring invoices (ORANGE, EDF...) same supplier + same amount but different month = NOT duplicate
-    let query = adminDb.collection('invoices')
-      .where('supplier_name', '==', supplierName)
+    // Fetch ALL invoices for user (supplier name spelling can vary — don't rely on exact match)
+    // Then filter client-side with normalization
+    const userSnap = await adminDb.collection('invoices')
+      .where('user_id', '==', decoded.uid)
+      .get()
 
-    const snap = await query.limit(50).get()
-
-    if (snap.empty) {
+    if (userSnap.empty) {
       return NextResponse.json({ isDuplicate: false })
     }
 
-    for (const doc of snap.docs) {
+    // Normalize supplier: strip accents, parens content, special chars
+    const normalizeSupplier = (s: string) =>
+      s.toUpperCase()
+        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
+        .replace(/\([^)]*\)/g, '')
+        .replace(/[^A-Z0-9]/g, '')
+        .trim()
+
+    const newSupplierNorm = supplierName ? normalizeSupplier(supplierName) : ''
+
+    for (const doc of userSnap.docs) {
       const data = doc.data()
 
-      // Check invoice number match (strongest signal)
-      const numberMatch = invoiceNumber && data.invoice_number && data.invoice_number === invoiceNumber
+      const existingSupplierNorm = normalizeSupplier((data.supplier_name || '').toString())
+      const sameNormalizedSupplier = newSupplierNorm && existingSupplierNorm && newSupplierNorm === existingSupplierNorm
 
-      // Check amount match (within 1 cent)
+      // Check invoice number match (strongest signal — always duplicate)
+      const numberMatch = invoiceNumber && data.invoice_number &&
+        data.invoice_number.toString().trim().toUpperCase() === invoiceNumber.trim().toUpperCase()
+
+      // Amount match within 1 cent
       const amountMatch = totalTtc && data.total_ttc != null &&
-        Math.abs(data.total_ttc - parseFloat(totalTtc)) < 0.01
+        Math.abs(Number(data.total_ttc) - parseFloat(totalTtc)) < 0.01
 
-      // Check date match (same month = duplicate, different month = recurring)
+      // Same month
       let sameMonth = false
       if (invoiceDate && data.invoice_date) {
-        const newMonth = invoiceDate.substring(0, 7) // YYYY-MM
-        const existingMonth = data.invoice_date.substring(0, 7)
-        sameMonth = newMonth === existingMonth
+        sameMonth = invoiceDate.substring(0, 7) === data.invoice_date.substring(0, 7)
       } else if (!invoiceDate && !data.invoice_date) {
-        // Both have no date, consider same period
         sameMonth = true
       }
 
-      // Duplicate conditions:
-      // 1. Same invoice number + same supplier (strongest - always duplicate regardless of date)
-      // 2. Same supplier + same amount + same month (recurring invoice same month = duplicate)
-      if (numberMatch) {
-        // Same invoice number = definite duplicate
+      // Duplicate conditions (any of these):
+      // 1. Same invoice number + same amount (ignoring supplier spelling) = duplicate
+      // 2. Same normalized supplier + same amount + same month = duplicate
+      if (numberMatch && amountMatch) {
         return NextResponse.json({
           isDuplicate: true,
           existingId: doc.id,
@@ -63,8 +72,7 @@ export async function GET(request: NextRequest) {
         })
       }
 
-      if (amountMatch && sameMonth) {
-        // Same supplier + same amount + same month = duplicate
+      if (sameNormalizedSupplier && amountMatch && sameMonth) {
         return NextResponse.json({
           isDuplicate: true,
           existingId: doc.id,
