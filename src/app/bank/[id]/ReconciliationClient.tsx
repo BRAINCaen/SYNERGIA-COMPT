@@ -780,7 +780,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                     <td className="max-w-xs truncate px-4 py-3 text-gray-200">
                       <div>
                         <p className="truncate">{tx.label}</p>
-                        {tx.status === 'matched' && tx.matched_entity && (
+                        {tx.status === 'matched' && tx.matched_entity ? (
                           <button
                             onClick={() => {
                               const path =
@@ -790,10 +790,16 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                               router.push(path)
                             }}
                             className="mt-0.5 flex items-center gap-1 text-xs text-accent-green hover:underline"
+                            title={tx.matched_entity.type === 'invoice' ? 'Voir la facture' : 'Voir l\'encaissement'}
                           >
                             <FileText className="h-3 w-3" />
-                            {tx.matched_entity.name}
+                            {tx.matched_entity.type === 'invoice' ? 'Facture' : 'Encaissement'}
                           </button>
+                        ) : tx.status === 'matched' && (
+                          <span className="mt-0.5 flex items-center gap-1 text-xs text-gray-500 italic" title="Rapproche sans document lie">
+                            <FileText className="h-3 w-3" />
+                            Sans document
+                          </span>
                         )}
                       </div>
                     </td>
