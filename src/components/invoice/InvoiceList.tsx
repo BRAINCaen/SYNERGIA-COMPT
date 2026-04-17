@@ -627,6 +627,50 @@ export default function InvoiceList() {
           </button>
           <button
             onClick={async () => {
+              setRenaming(true)
+              setRenameResult(null)
+              try {
+                const res = await authFetch('/api/invoices/detect-bank-statements')
+                if (!res.ok) { setRenameResult('Erreur'); setRenaming(false); return }
+                const data = await res.json()
+                if (data.count === 0) {
+                  setRenameResult('Aucun releve bancaire trouve dans les factures')
+                  setRenaming(false)
+                  return
+                }
+                const details = data.suspects.slice(0, 5).map((s: { file_name: string }) => `- ${s.file_name}`).join('\n')
+                const more = data.suspects.length > 5 ? `\n... et ${data.suspects.length - 5} autres` : ''
+                const ok = confirm(
+                  `${data.count} releve(s) bancaire(s) trouve(s) dans les factures :\n\n${details}${more}\n\n` +
+                  `Ces fichiers sont des DOUBLONS — les vrais releves sont dans la page "Releves bancaires".\n\n` +
+                  `Supprimer ces ${data.count} facture(s) ?`
+                )
+                if (!ok) { setRenaming(false); return }
+                // Delete in batch
+                const ids = data.suspects.map((s: { id: string }) => s.id)
+                const delRes = await authFetch('/api/invoices/batch', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'delete', invoice_ids: ids }),
+                })
+                if (delRes.ok) {
+                  setRenameResult(`${ids.length} releve(s) supprime(s)`)
+                  fetchInvoices()
+                } else {
+                  setRenameResult('Erreur suppression')
+                }
+              } catch { setRenameResult('Erreur') }
+              setRenaming(false)
+            }}
+            disabled={renaming || batchScanning}
+            className="flex items-center gap-1.5 rounded-lg border border-yellow-500/50 px-3 py-1.5 text-xs text-yellow-400 hover:bg-yellow-500/10 transition-colors disabled:opacity-50"
+            title="Detecter et supprimer les releves bancaires mal classifies comme factures"
+          >
+            <Landmark className="h-3.5 w-3.5" />
+            Nettoyer releves
+          </button>
+          <button
+            onClick={async () => {
               if (!confirm('Supprimer les factures en double (meme fournisseur + montant + numero) ?')) return
               setDeduplicating(true)
               setDedupeResult(null)
