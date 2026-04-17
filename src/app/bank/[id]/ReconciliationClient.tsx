@@ -141,7 +141,11 @@ export default function ReconciliationClient({ statementId }: { statementId: str
           debit: t.type === 'debit' ? t.amount : null,
           credit: t.type === 'credit' ? t.amount : null,
           status: t.match_status || 'unmatched',
-          matched_entity: t.matched_invoice_id ? { id: t.matched_invoice_id, type: 'invoice', name: '', amount: t.amount, date: t.date } : null,
+          matched_entity: t.matched_invoice_id
+            ? { id: t.matched_invoice_id, type: 'invoice' as const, name: '', amount: t.amount, date: t.date }
+            : t.matched_revenue_id
+              ? { id: t.matched_revenue_id, type: 'revenue' as const, name: '', amount: t.amount, date: t.date }
+              : null,
         }))
         setTransactions(txList)
       }
@@ -782,7 +786,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                               const path =
                                 tx.matched_entity!.type === 'invoice'
                                   ? `/invoices/${tx.matched_entity!.id}`
-                                  : `/revenue/${tx.matched_entity!.id}`
+                                  : `/revenue?id=${tx.matched_entity!.id}`
                               router.push(path)
                             }}
                             className="mt-0.5 flex items-center gap-1 text-xs text-accent-green hover:underline"
