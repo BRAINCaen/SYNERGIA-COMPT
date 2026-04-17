@@ -890,7 +890,13 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
       </div>
 
       {/* Bank match details */}
-      {matchedTxDetails.length > 0 && !showBankMatch && (
+      {matchedTxDetails.length > 0 && !showBankMatch && (() => {
+        const txTotal = matchedTxDetails.reduce((sum, t) => sum + (Number(t.amount) || 0), 0)
+        const invoiceTotal = Math.abs(invoice?.total_ttc || 0)
+        const diff = Math.abs(txTotal - invoiceTotal)
+        const isMatch = diff < 0.01
+        const isClose = diff < 1
+        return (
         <div className="card space-y-3">
           <div className="flex items-center justify-between">
             <div className="flex items-center gap-2">
@@ -900,6 +906,34 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
               </span>
             </div>
             <span className="text-xs text-gray-500">Cliquez &quot;Rapprocher +&quot; pour en ajouter</span>
+          </div>
+          {/* Total comparison */}
+          <div className={`flex items-center justify-between rounded-lg border px-3 py-2 ${
+            isMatch ? 'border-accent-green/40 bg-accent-green/10' :
+            isClose ? 'border-accent-orange/40 bg-accent-orange/10' :
+            'border-accent-red/40 bg-accent-red/10'
+          }`}>
+            <div className="flex items-center gap-2">
+              <span className="text-xs uppercase tracking-wider text-gray-500">Total rapproche</span>
+              <span className={`font-mono text-base font-bold ${
+                isMatch ? 'text-accent-green' : isClose ? 'text-accent-orange' : 'text-accent-red'
+              }`}>
+                {txTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+              </span>
+            </div>
+            <div className="flex items-center gap-2 text-xs">
+              <span className="text-gray-500">vs facture :</span>
+              <span className="font-mono font-medium text-gray-300">
+                {invoiceTotal.toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+              </span>
+              {isMatch ? (
+                <span className="rounded bg-accent-green/20 px-2 py-0.5 font-bold text-accent-green">MATCH</span>
+              ) : (
+                <span className={`rounded px-2 py-0.5 font-bold ${isClose ? 'bg-accent-orange/20 text-accent-orange' : 'bg-accent-red/20 text-accent-red'}`}>
+                  {txTotal > invoiceTotal ? '+' : ''}{(txTotal - invoiceTotal).toLocaleString('fr-FR', { minimumFractionDigits: 2, maximumFractionDigits: 2 })} €
+                </span>
+              )}
+            </div>
           </div>
           <div className="space-y-1">
             {matchedTxDetails.map((tx: any) => (
@@ -937,7 +971,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
             ))}
           </div>
         </div>
-      )}
+      )})()}
 
       {/* Bank match section */}
       {showBankMatch && (
