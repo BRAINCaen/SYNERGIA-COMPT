@@ -132,6 +132,9 @@ export default function InvoiceList() {
         }),
       })
 
+      // Default final status — make sure we never leave 'processing'
+      let finalStatus = 'classified'
+
       if (classifyRes.ok) {
         const classifyData = await classifyRes.json()
         if (classifyData.classifications) {
@@ -167,18 +170,32 @@ export default function InvoiceList() {
               body: JSON.stringify({ lines }),
             })
           }
-
-          await authFetch(`/api/invoices/${invoiceId}`, {
-            method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ status: 'classified' }),
-          })
         }
       }
+
+      // If no supplier was extracted, mark as error so it stays visible for retry
+      if (!extraction.supplier?.name) {
+        finalStatus = 'error'
+      }
+
+      // ALWAYS update status (escape from 'processing')
+      await authFetch(`/api/invoices/${invoiceId}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ status: finalStatus }),
+      })
 
       fetchInvoices()
     } catch (e) {
       console.error('Rescan error:', e)
+      // On error, mark as 'error' status so it doesn't stay in 'processing'
+      try {
+        await authFetch(`/api/invoices/${invoiceId}`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ status: 'error' }),
+        })
+      } catch {}
     }
     setRescanningIds(prev => { const next = new Set(prev); next.delete(invoiceId); return next })
   }
