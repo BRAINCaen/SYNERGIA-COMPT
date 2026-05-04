@@ -696,6 +696,47 @@ export default function InvoiceList() {
           </button>
           <button
             onClick={async () => {
+              const stuckInvoices = invoices.filter((inv) =>
+                !inv.supplier_name && (inv.status === 'pending' || inv.status === 'error' || inv.status === 'processing')
+              )
+              if (stuckInvoices.length === 0) {
+                setRenameResult('Aucune facture en attente sans donnees')
+                return
+              }
+              const ok = confirm(
+                `Supprimer ${stuckInvoices.length} facture(s) bloquee(s) en attente sans donnees ?\n\n` +
+                `Ces factures n'ont pas pu etre extraites par l'IA (PDF illisible, vide, ou non-facture).\n\n` +
+                `Liste (5 premieres) :\n` +
+                stuckInvoices.slice(0, 5).map(i => `- ${i.file_name}`).join('\n') +
+                (stuckInvoices.length > 5 ? `\n... et ${stuckInvoices.length - 5} autres` : '')
+              )
+              if (!ok) return
+              setRenaming(true)
+              try {
+                const ids = stuckInvoices.map(i => i.id)
+                const res = await authFetch('/api/invoices/batch', {
+                  method: 'POST',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ action: 'delete', invoice_ids: ids }),
+                })
+                if (res.ok) {
+                  setRenameResult(`${ids.length} facture(s) bloquee(s) supprimee(s)`)
+                  fetchInvoices()
+                } else {
+                  setRenameResult('Erreur suppression')
+                }
+              } catch { setRenameResult('Erreur') }
+              setRenaming(false)
+            }}
+            disabled={renaming || batchScanning}
+            className="flex items-center gap-1.5 rounded-lg border border-accent-red/50 px-3 py-1.5 text-xs text-accent-red hover:bg-accent-red/10 transition-colors disabled:opacity-50"
+            title="Supprimer toutes les factures bloquees en attente sans donnees extraites"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+            Vider en attente
+          </button>
+          <button
+            onClick={async () => {
               if (!confirm('Supprimer les factures en double (meme fournisseur + montant + numero) ?')) return
               setDeduplicating(true)
               setDedupeResult(null)
