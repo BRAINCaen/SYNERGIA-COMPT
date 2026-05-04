@@ -851,7 +851,8 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                 }
 
                 // ALWAYS finalize status — never leave it as 'processing'
-                const finalStatus = extraction.supplier?.name ? 'classified' : 'error'
+                // 'classified' = success, 'pending' = retry needed (no supplier)
+                const finalStatus = extraction.supplier?.name ? 'classified' : 'pending'
                 await authFetch(`/api/invoices/${invoiceId}`, {
                   method: 'PATCH',
                   headers: { 'Content-Type': 'application/json' },
@@ -861,12 +862,12 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                 await fetchInvoice()
               } catch (e) {
                 alert(`Erreur : ${e instanceof Error ? e.message : 'inconnue'}`)
-                // Mark as error so it doesn't stay in 'processing'
+                // Revert to pending so user can retry — do NOT mark as 'error' for API failures
                 try {
                   await authFetch(`/api/invoices/${invoiceId}`, {
                     method: 'PATCH',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ status: 'error' }),
+                    body: JSON.stringify({ status: 'pending' }),
                   })
                   await fetchInvoice()
                 } catch {}

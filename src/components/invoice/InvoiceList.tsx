@@ -173,12 +173,11 @@ export default function InvoiceList() {
         }
       }
 
-      // If no supplier was extracted, mark as error so it stays visible for retry
-      if (!extraction.supplier?.name) {
-        finalStatus = 'error'
-      }
+      // Status logic:
+      // - 'classified' if supplier was extracted (success)
+      // - 'pending' if extraction returned but no supplier (PDF maybe illisible) — allows easy retry
+      finalStatus = extraction.supplier?.name ? 'classified' : 'pending'
 
-      // ALWAYS update status (escape from 'processing')
       await authFetch(`/api/invoices/${invoiceId}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json' },
@@ -188,14 +187,16 @@ export default function InvoiceList() {
       fetchInvoices()
     } catch (e) {
       console.error('Rescan error:', e)
-      // On error, mark as 'error' status so it doesn't stay in 'processing'
+      // On error (network, API down, rate limit), revert to 'pending' so user can retry easily
+      // Do NOT mark as 'error' just because of a transient API issue
       try {
         await authFetch(`/api/invoices/${invoiceId}`, {
           method: 'PATCH',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ status: 'error' }),
+          body: JSON.stringify({ status: 'pending' }),
         })
       } catch {}
+      throw e // propagate so the batch counter shows the error
     }
     setRescanningIds(prev => { const next = new Set(prev); next.delete(invoiceId); return next })
   }
@@ -749,7 +750,7 @@ export default function InvoiceList() {
                   done++
                 } catch { errors++ }
                 if (done + errors < ids.length) {
-                  await new Promise((r) => setTimeout(r, 3000))
+                  await new Promise((r) => setTimeout(r, 6000))
                 }
               }
               setScanProgress(`${done} rescannee(s)${errors > 0 ? `, ${errors} erreur(s)` : ''}`)
