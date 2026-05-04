@@ -35,6 +35,31 @@ export async function POST(request: NextRequest) {
       const invoiceNum = (data.invoice_number || '').toString().trim().toUpperCase()
       const totalTtc = data.total_ttc != null ? Number(data.total_ttc).toFixed(2) : ''
       const date = (data.invoice_date || '').toString().slice(0, 7) // YYYY-MM
+      const fileName = (data.file_name || '').toString().trim().toLowerCase()
+      const gmailMsgId = (data.gmail_message_id || '').toString().trim()
+
+      // Strategy 0: GMAIL match — same gmail message id = same file imported twice
+      if (gmailMsgId) {
+        const fp = `GMAIL|${gmailMsgId}`
+        if (seen.has(fp)) {
+          duplicateIds.push(doc.id)
+          duplicateDetails.push(`${data.file_name || doc.id} (Gmail ${gmailMsgId.slice(0, 8)}...)`)
+          continue
+        }
+        seen.set(fp, { id: doc.id, created_at: data.created_at || '' })
+      }
+
+      // Strategy 0bis: NAME match — for invoices WITHOUT extracted data
+      // Two invoices with same file_name and no supplier = likely duplicate uploads
+      if (!supplier && !invoiceNum && fileName) {
+        const fp = `NAME|${fileName}`
+        if (seen.has(fp)) {
+          duplicateIds.push(doc.id)
+          duplicateDetails.push(`${data.file_name || doc.id} (meme nom, sans donnees)`)
+          continue
+        }
+        seen.set(fp, { id: doc.id, created_at: data.created_at || '' })
+      }
 
       if (!supplier && !invoiceNum) continue
 
