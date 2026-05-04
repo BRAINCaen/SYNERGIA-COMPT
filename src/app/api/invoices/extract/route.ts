@@ -140,9 +140,10 @@ export async function POST(request: NextRequest) {
           { type: 'text' as const, text: EXTRACTION_PROMPT },
         ]
 
-    // Retry on 429/529 errors
+    // Retry on 429/529/500/overloaded errors with exponential backoff
     let response
-    for (let attempt = 0; attempt < 3; attempt++) {
+    let lastError: unknown = null
+    for (let attempt = 0; attempt < 4; attempt++) {
       try {
         response = await anthropic.messages.create({
           model: EXTRACTION_MODEL,
@@ -151,14 +152,21 @@ export async function POST(request: NextRequest) {
         })
         break
       } catch (e: any) {
-        if ((e?.status === 429 || e?.status === 529) && attempt < 2) {
-          await new Promise(r => setTimeout(r, 10000 * (attempt + 1)))
+        lastError = e
+        const isRetryable = e?.status === 429 || e?.status === 529 || e?.status === 500 || e?.status === 503
+        if (isRetryable && attempt < 3) {
+          // 3s, 8s, 15s
+          const delays = [3000, 8000, 15000]
+          await new Promise(r => setTimeout(r, delays[attempt]))
           continue
         }
         throw e
       }
     }
-    if (!response) throw new Error('Pas de réponse après 3 tentatives')
+    if (!response) {
+      const msg = lastError instanceof Error ? lastError.message : 'API indisponible apres 4 tentatives'
+      throw new Error(msg)
+    }
 
     const textBlock = response.content.find((block) => block.type === 'text')
     if (!textBlock || textBlock.type !== 'text') {
