@@ -531,8 +531,13 @@ export default function InvoiceList() {
             onClick={async () => {
               setBatchScanning(true)
               setScanProgress('Demarrage...')
+              // Catch all invoices without proper data:
+              // - 'pending' (never processed)
+              // - 'error' (extraction failed)
+              // - 'processing' (stuck mid-extraction — no supplier saved)
+              // - any status with no supplier name (extraction never completed)
               const pendingInvoices = invoices.filter((inv) =>
-                (inv.status === 'pending' || inv.status === 'error') && !inv.supplier_name
+                !inv.supplier_name || inv.status === 'pending' || inv.status === 'error' || inv.status === 'processing'
               )
               if (pendingInvoices.length === 0) {
                 setScanProgress('Aucune facture en attente a scanner')
@@ -1055,7 +1060,7 @@ function InvoiceTable({
               </td>
               <td className="w-16 px-2 py-3">
                 <div className="flex items-center gap-1">
-                {(invoice.status === 'pending' || invoice.status === 'error' || (!invoice.supplier_name && !invoice.total_ttc)) && (
+                {(invoice.status === 'pending' || invoice.status === 'error' || invoice.status === 'processing' || !invoice.supplier_name) && (
                   <button
                     onClick={(e) => { e.stopPropagation(); onRescan(invoice.id) }}
                     disabled={rescanningIds.has(invoice.id)}
