@@ -798,61 +798,78 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                   }),
                 })
 
-                // Classify lines with AI
+                // Classify lines with AI (best effort)
                 if (extraction.lines?.length > 0) {
-                  const classifyRes = await authFetch('/api/invoices/classify', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                      lines: extraction.lines,
-                      supplier_name: extraction.supplier?.name || 'Inconnu',
-                    }),
-                  })
-
-                  if (classifyRes.ok) {
-                    const { classifications } = await classifyRes.json()
-                    const newLines = extraction.lines
-                      .filter((line: { total_ht?: number; total_ttc?: number }) => (line.total_ht || 0) > 0 || (line.total_ttc || 0) > 0)
-                      .map((line: { description?: string; quantity?: number; unit_price?: number; total_ht?: number; tva_rate?: number; tva_amount?: number; total_ttc?: number }, i: number) => {
-                      const c = classifications?.find((cl: { line_index: number }) => cl.line_index === i)
-                      return {
-                        description: line.description || '',
-                        quantity: line.quantity || 1,
-                        unit_price: line.unit_price || line.total_ht,
-                        total_ht: line.total_ht || 0,
-                        tva_rate: line.tva_rate || null,
-                        tva_amount: line.tva_amount || null,
-                        total_ttc: line.total_ttc || null,
-                        pcg_code: c?.pcg_code || null,
-                        pcg_label: c?.pcg_label || null,
-                        confidence_score: c?.confidence || null,
-                        manually_corrected: false,
-                        journal_code: c?.journal_code || 'AC',
-                        reasoning: c?.reasoning || null,
-                        is_immobilization: c?.is_immobilization || false,
-                        amortization_rate: c?.amortization_rate || null,
-                        classification_method: c?.classification_method || 'ai',
-                      }
-                    })
-
-                    // Save lines
-                    await authFetch(`/api/invoices/${invoiceId}/lines`, {
+                  try {
+                    const classifyRes = await authFetch('/api/invoices/classify', {
                       method: 'POST',
                       headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ lines: newLines }),
+                      body: JSON.stringify({
+                        lines: extraction.lines,
+                        supplier_name: extraction.supplier?.name || 'Inconnu',
+                      }),
                     })
 
-                    await authFetch(`/api/invoices/${invoiceId}`, {
-                      method: 'PATCH',
-                      headers: { 'Content-Type': 'application/json' },
-                      body: JSON.stringify({ status: 'classified' }),
-                    })
+                    if (classifyRes.ok) {
+                      const { classifications } = await classifyRes.json()
+                      const newLines = extraction.lines
+                        .filter((line: { total_ht?: number; total_ttc?: number }) => (line.total_ht || 0) > 0 || (line.total_ttc || 0) > 0)
+                        .map((line: { description?: string; quantity?: number; unit_price?: number; total_ht?: number; tva_rate?: number; tva_amount?: number; total_ttc?: number }, i: number) => {
+                        const c = classifications?.find((cl: { line_index: number }) => cl.line_index === i)
+                        return {
+                          description: line.description || '',
+                          quantity: line.quantity || 1,
+                          unit_price: line.unit_price || line.total_ht,
+                          total_ht: line.total_ht || 0,
+                          tva_rate: line.tva_rate || null,
+                          tva_amount: line.tva_amount || null,
+                          total_ttc: line.total_ttc || null,
+                          pcg_code: c?.pcg_code || null,
+                          pcg_label: c?.pcg_label || null,
+                          confidence_score: c?.confidence || null,
+                          manually_corrected: false,
+                          journal_code: c?.journal_code || 'AC',
+                          reasoning: c?.reasoning || null,
+                          is_immobilization: c?.is_immobilization || false,
+                          amortization_rate: c?.amortization_rate || null,
+                          classification_method: c?.classification_method || 'ai',
+                        }
+                      })
+
+                      // Save lines
+                      if (newLines.length > 0) {
+                        await authFetch(`/api/invoices/${invoiceId}/lines`, {
+                          method: 'POST',
+                          headers: { 'Content-Type': 'application/json' },
+                          body: JSON.stringify({ lines: newLines }),
+                        })
+                      }
+                    }
+                  } catch (e) {
+                    console.error('Classify error:', e)
                   }
                 }
+
+                // ALWAYS finalize status — never leave it as 'processing'
+                const finalStatus = extraction.supplier?.name ? 'classified' : 'error'
+                await authFetch(`/api/invoices/${invoiceId}`, {
+                  method: 'PATCH',
+                  headers: { 'Content-Type': 'application/json' },
+                  body: JSON.stringify({ status: finalStatus }),
+                })
 
                 await fetchInvoice()
               } catch (e) {
                 alert(`Erreur : ${e instanceof Error ? e.message : 'inconnue'}`)
+                // Mark as error so it doesn't stay in 'processing'
+                try {
+                  await authFetch(`/api/invoices/${invoiceId}`, {
+                    method: 'PATCH',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ status: 'error' }),
+                  })
+                  await fetchInvoice()
+                } catch {}
               }
               setSaving(false)
             }}
