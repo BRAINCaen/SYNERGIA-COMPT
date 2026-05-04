@@ -122,15 +122,16 @@ export default function InvoiceList() {
         }),
       })
 
-      // Now classify
-      const classifyRes = await authFetch('/api/invoices/classify', {
+      // Skip classify if no lines to classify (avoids 400)
+      const hasLines = Array.isArray(extraction.lines) && extraction.lines.length > 0
+      const classifyRes = hasLines ? await authFetch('/api/invoices/classify', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          lines: extraction.lines || [],
+          lines: extraction.lines,
           supplier_name: extraction.supplier?.name || 'Inconnu',
         }),
-      })
+      }) : { ok: false, json: async () => ({ classifications: [] }) } as Response
 
       // Default final status — make sure we never leave 'processing'
       let finalStatus = 'classified'
