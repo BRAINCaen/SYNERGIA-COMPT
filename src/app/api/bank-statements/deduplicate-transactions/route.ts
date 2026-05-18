@@ -33,15 +33,27 @@ export async function POST(request: NextRequest) {
     type Doc = FirebaseFirestore.QueryDocumentSnapshot
     const groups = new Map<string, Doc[]>()
 
+    // Take only first N significant chars of label (handles slight differences)
+    const labelKey = (label: string) => {
+      const norm = normalizeLabel(label)
+      // First 30 chars after stripping common variable suffixes (refs, IDs)
+      return norm
+        .replace(/\b(REF|NUM|ID|RUM|VU\d+|CU\d+|SCT\w+)\s*\S*/gi, '') // strip variable refs
+        .replace(/\d{8,}/g, '') // strip long numbers (IDs)
+        .replace(/\s+/g, ' ')
+        .trim()
+        .slice(0, 40)
+    }
+
     for (const doc of snap.docs) {
       const data = doc.data()
       const date = (data.date || '').toString().slice(0, 10)
       const amount = data.amount != null ? Number(data.amount).toFixed(2) : ''
-      const label = normalizeLabel((data.label || '').toString())
+      const label = labelKey((data.label || '').toString())
       const type = data.type || ''
       if (!date || !amount || !label) continue
 
-      // Fingerprint: date + amount + type + normalized label
+      // Fingerprint: date + amount + type + normalized truncated label
       const fp = `${date}|${type}|${amount}|${label}`
       if (!groups.has(fp)) groups.set(fp, [])
       groups.get(fp)!.push(doc)
