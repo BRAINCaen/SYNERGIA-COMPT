@@ -3,6 +3,7 @@ import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb, adminStorage } from '@/lib/firebase/admin'
 import { writeAuditLog } from '@/lib/audit'
 import { parseCSV, parseExcel, ParsedTransaction } from '@/lib/bank-parsers'
+import { forceTypeFromLabel, fingerprint } from '@/lib/bank-tx-validator'
 // PDF parsing handled by separate /api/bank-statements/[id]/analyze endpoint
 
 export const maxDuration = 25 // Allow up to 25s for PDF parsing with Claude Vision
@@ -60,14 +61,33 @@ async function writeTransactions(
 ) {
   let totalDebits = 0
   let totalCredits = 0
+  let forcedCount = 0
+  let skippedDupCount = 0
+  const seen = new Set<string>()
 
   for (let i = 0; i < parsed.length; i += 490) {
     const chunk = parsed.slice(i, i + 490)
     const batch = adminDb.batch()
+    let batchHasWrites = false
 
     for (const t of chunk) {
-      const isDebit = t.debit != null && t.debit > 0
-      const amount = isDebit ? Math.abs(t.debit!) : Math.abs(t.credit!)
+      // Determine type with deterministic override
+      let isDebit = t.debit != null && t.debit > 0
+      const forced = forceTypeFromLabel(t.label || '')
+      if (forced && (forced === 'debit') !== isDebit) {
+        isDebit = forced === 'debit'
+        forcedCount++
+      }
+      const amount = Math.abs(t.debit ?? t.credit ?? 0)
+      if (amount === 0) continue
+
+      // Dedup within this batch
+      const fp = fingerprint(t.date || '', isDebit ? 'debit' : 'credit', amount, t.label || '')
+      if (seen.has(fp)) {
+        skippedDupCount++
+        continue
+      }
+      seen.add(fp)
 
       if (isDebit) totalDebits += amount
       else totalCredits += amount
@@ -91,12 +111,13 @@ async function writeTransactions(
         notes: null,
         created_at: new Date().toISOString(),
       })
+      batchHasWrites = true
     }
 
-    await batch.commit()
+    if (batchHasWrites) await batch.commit()
   }
 
-  return { totalDebits, totalCredits }
+  return { totalDebits, totalCredits, forcedCount, skippedDupCount, insertedCount: seen.size }
 }
 
 export async function POST(request: NextRequest) {
@@ -186,18 +207,15 @@ export async function POST(request: NextRequest) {
           })
         }
 
-        // Write transactions in batches
-        const { totalDebits, totalCredits } = await writeTransactions(
-          statementRef.id,
-          decoded.uid,
-          parsed
-        )
+        // Write transactions in batches (with deterministic corrections + dedup)
+        const { totalDebits, totalCredits, forcedCount, skippedDupCount, insertedCount } =
+          await writeTransactions(statementRef.id, decoded.uid, parsed)
 
         const periodMonth = computePeriodMonth(parsed)
 
         await statementRef.update({
           status: 'parsed',
-          transaction_count: parsed.length,
+          transaction_count: insertedCount,
           total_debits: Math.round(totalDebits * 100) / 100,
           total_credits: Math.round(totalCredits * 100) / 100,
           period_month: periodMonth,
@@ -211,7 +229,7 @@ export async function POST(request: NextRequest) {
           after: {
             file_name: file.name,
             format,
-            transaction_count: parsed.length,
+            transaction_count: insertedCount,
             total_debits: Math.round(totalDebits * 100) / 100,
             total_credits: Math.round(totalCredits * 100) / 100,
           },
@@ -221,7 +239,9 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({
           success: true,
           statement: { id: updatedDoc.id, ...updatedDoc.data() },
-          transaction_count: parsed.length,
+          transaction_count: insertedCount,
+          type_corrections: forcedCount,
+          skipped_duplicates: skippedDupCount,
         })
       } catch (parseError) {
         console.error('Parse error:', parseError)

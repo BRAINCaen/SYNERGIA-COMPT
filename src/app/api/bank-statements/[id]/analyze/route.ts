@@ -3,6 +3,7 @@ import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb, adminStorage } from '@/lib/firebase/admin'
 import anthropic, { FAST_MODEL } from '@/lib/anthropic'
 import { ParsedTransaction } from '@/lib/bank-parsers'
+import { forceTypeFromLabel, normalizeLabel } from '@/lib/bank-tx-validator'
 
 export const dynamic = 'force-dynamic'
 
@@ -42,10 +43,28 @@ export async function POST(
           },
           {
             type: 'text',
-            text: `Extrais TOUTES les transactions de ce relevé bancaire en JSON.
-Pour chaque ligne: date (YYYY-MM-DD), value_date (YYYY-MM-DD ou null), label (libellé complet), reference (null si absent), debit (nombre ou null), credit (nombre ou null).
-Dates JJ/MM/AAAA → YYYY-MM-DD. Montants en nombres sans €. Exclure les soldes.
-Réponds UNIQUEMENT avec le JSON: [{"date":"2026-01-15","value_date":null,"label":"PRLV SEPA EDF","reference":null,"debit":85.50,"credit":null}]`
+            text: `Extrais TOUTES les transactions de ce releve bancaire Credit Mutuel en JSON.
+
+Pour chaque ligne : date (YYYY-MM-DD), value_date (YYYY-MM-DD ou null), label (libelle court, premiere ligne sans details ICS/RUM), reference (null si absent), debit (nombre ou null), credit (nombre ou null).
+
+REGLE ABSOLUE debit/credit : regarde VISUELLEMENT dans quelle colonne le montant se trouve
+- Colonne "Debit EUROS" = debit (debit=nombre, credit=null)
+- Colonne "Credit EUROS" = credit (credit=nombre, debit=null)
+- Une transaction n'a JAMAIS les deux remplis ni les deux nuls
+- Ne JAMAIS extraire la meme ligne deux fois (une en debit, une en credit) : c'est une erreur
+
+Regles metier strictes (a appliquer si tu hesites) :
+- REMCB / REMISE CHEQUE / REMISE TICKET = TOUJOURS credit
+- VIR PAYPAL PTE LTD = TOUJOURS credit (encaissements iZettle)
+- VIR EDENRED / CAP LOISIRS / LUDOBOX / FUNBOOKER / ASP / DRFIP = TOUJOURS credit
+- PRLV SEPA / PAIEMENT CB / FRAIS / COMCB / ECH PRET / INTERETS = TOUJOURS debit
+- VIR SEPA ACOMPTE / SALAIRE / LOYER / FORFAIT / INDEMNITES = TOUJOURS debit
+- VIR BOEHME ALLAN = debit (gerant qui retire)
+
+Dates JJ/MM/AAAA -> YYYY-MM-DD. Montants en nombres avec point decimal (1234.56), sans symbole, sans espace.
+Exclure : SOLDE CREDITEUR, SOLDE DEBITEUR, Total mouvements, Report, en-tetes, pieds de page.
+
+Reponds UNIQUEMENT avec le JSON: [{"date":"2026-01-15","value_date":null,"label":"PRLV SEPA EDF","reference":null,"debit":85.50,"credit":null}]`
           }
         ],
       }],
@@ -72,17 +91,49 @@ Réponds UNIQUEMENT avec le JSON: [{"date":"2026-01-15","value_date":null,"label
       return NextResponse.json({ success: false, error: 'Aucune transaction trouvée' })
     }
 
+    // Existing transactions for dedup
+    const existingSnap = await adminDb
+      .collection('bankTransactions')
+      .where('statement_id', '==', params.id)
+      .get()
+    const existingFingerprints = new Set<string>()
+    for (const d of existingSnap.docs) {
+      const data = d.data()
+      const date = (data.date || '').toString().slice(0, 10)
+      const amt = data.amount != null ? Number(data.amount).toFixed(2) : ''
+      const lbl = normalizeLabel(data.label || '')
+      existingFingerprints.add(`${date}|${data.type}|${amt}|${lbl}`)
+    }
+    const insertedFingerprints = new Set<string>()
+
     // Write transactions in batches
     let totalDebits = 0
     let totalCredits = 0
+    let forcedCount = 0
+    let skippedDupCount = 0
 
     for (let i = 0; i < parsed.length; i += 490) {
       const chunk = parsed.slice(i, i + 490)
       const batch = adminDb.batch()
+      let batchHasWrites = false
 
       for (const t of chunk) {
-        const isDebit = t.debit != null && t.debit > 0
-        const amount = isDebit ? Math.abs(t.debit!) : Math.abs(t.credit!)
+        let isDebit = t.debit != null && t.debit > 0
+        const forced = forceTypeFromLabel(t.label || '')
+        if (forced && (forced === 'debit') !== isDebit) {
+          isDebit = forced === 'debit'
+          forcedCount++
+        }
+        const amount = Math.abs(t.debit ?? t.credit ?? 0)
+        if (amount === 0) continue
+
+        const dateKey = (t.date || '').toString().slice(0, 10)
+        const fp = `${dateKey}|${isDebit ? 'debit' : 'credit'}|${amount.toFixed(2)}|${normalizeLabel(t.label || '')}`
+        if (existingFingerprints.has(fp) || insertedFingerprints.has(fp)) {
+          skippedDupCount++
+          continue
+        }
+        insertedFingerprints.add(fp)
 
         if (isDebit) totalDebits += amount
         else totalCredits += amount
@@ -103,10 +154,12 @@ Réponds UNIQUEMENT avec le JSON: [{"date":"2026-01-15","value_date":null,"label
           matched_revenue_id: null,
           created_at: new Date().toISOString(),
         })
+        batchHasWrites = true
       }
 
-      await batch.commit()
+      if (batchHasWrites) await batch.commit()
     }
+    const insertedCount = insertedFingerprints.size
 
     // Compute period month
     const months: Record<string, number> = {}
@@ -122,20 +175,36 @@ Réponds UNIQUEMENT avec le JSON: [{"date":"2026-01-15","value_date":null,"label
       if (count > bestCount) { periodMonth = ym; bestCount = count }
     }
 
+    // Include existing transactions in totals
+    let existingDebits = 0
+    let existingCredits = 0
+    for (const d of existingSnap.docs) {
+      const data = d.data()
+      const amt = Number(data.amount) || 0
+      if (data.type === 'debit') existingDebits += amt
+      else existingCredits += amt
+    }
+    const finalDebits = Math.round((existingDebits + totalDebits) * 100) / 100
+    const finalCredits = Math.round((existingCredits + totalCredits) * 100) / 100
+    const finalCount = existingSnap.size + insertedCount
+
     await adminDb.collection('bankStatements').doc(params.id).update({
       status: 'parsed',
-      transaction_count: parsed.length,
-      total_debits: Math.round(totalDebits * 100) / 100,
-      total_credits: Math.round(totalCredits * 100) / 100,
+      transaction_count: finalCount,
+      total_debits: finalDebits,
+      total_credits: finalCredits,
       period_month: periodMonth || null,
       updated_at: new Date().toISOString(),
     })
 
     return NextResponse.json({
       success: true,
-      transaction_count: parsed.length,
-      total_debits: Math.round(totalDebits * 100) / 100,
-      total_credits: Math.round(totalCredits * 100) / 100,
+      transaction_count: finalCount,
+      inserted_count: insertedCount,
+      type_corrections: forcedCount,
+      skipped_duplicates: skippedDupCount,
+      total_debits: finalDebits,
+      total_credits: finalCredits,
     })
   } catch (error) {
     console.error('Analyze bank statement error:', error)

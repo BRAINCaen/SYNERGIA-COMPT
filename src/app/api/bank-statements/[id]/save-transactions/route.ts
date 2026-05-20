@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb } from '@/lib/firebase/admin'
+import { forceTypeFromLabel, normalizeLabel } from '@/lib/bank-tx-validator'
 
 export const dynamic = 'force-dynamic'
 
@@ -45,31 +46,6 @@ export async function POST(
         }
       })
     }
-
-    // Deterministic debit/credit corrector — overrides AI errors
-    // Returns 'debit' | 'credit' | null (null = trust AI)
-    const forceTypeFromLabel = (label: string): 'debit' | 'credit' | null => {
-      const u = (label || '').toUpperCase()
-      // Forced CREDIT (recettes)
-      if (/^REMCB|REMISE CHEQUE|REMISE TICKET|REMISE ANCV/.test(u)) return 'credit'
-      if (/VIR PAYPAL|VIR SEPA PAYPAL/.test(u)) return 'credit'
-      if (/VIR (SEPA )?(INST )?(EDENRED|CAP LOISIRS|LUDOBOX|FUNBOOKER|ASP |DRFIP|EUROFEU|ORANGE|SOCOTEC)/.test(u)) return 'credit'
-      // Forced DEBIT (depenses)
-      if (/^PRLV |^PAIEMENT CB|^FRAIS |^COMCB|^ECH PRET|^INTERETS|FACT SGT|PLAN SANTE|TNS PREVOYANCE|COMPLEMENTAIRE SANTE|AUTOMOBILE PRO/.test(u)) return 'debit'
-      if (/^VIR (SEPA |INST )?ACOMPTE|^VIR (SEPA |INST )?SALAIRE|^VIR (SEPA )?LOYER|^VIR (SEPA )?FORFAIT|^VIR (SEPA )?INDEMNITES/.test(u)) return 'debit'
-      if (/VIR (SEPA )?BOEHME ALLAN|VIR (SEPA )?ALLAN BOEHME/.test(u)) return 'debit'
-      return null
-    }
-
-    // Normalize label for dedup fingerprinting (strip variable refs/IDs)
-    const normalizeLabel = (s: string) =>
-      (s || '').toUpperCase()
-        .normalize('NFD').replace(/[̀-ͯ]/g, '')
-        .replace(/\b(REF|NUM|ID|RUM|VU\d+|CU\d+|SCT\w+)\s*\S*/gi, '')
-        .replace(/\d{8,}/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 40)
 
     // Fetch existing transactions for this statement to skip duplicates on re-parse
     const existingSnap = await adminDb

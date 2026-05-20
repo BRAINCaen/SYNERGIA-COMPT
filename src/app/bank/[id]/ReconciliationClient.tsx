@@ -85,6 +85,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [searchResults, setSearchResults] = useState<MatchCandidate[]>([])
   const [searching, setSearching] = useState(false)
   const [autoReconciling, setAutoReconciling] = useState(false)
+  const [rescanning, setRescanning] = useState(false)
   const [txSearch, setTxSearch] = useState('')
   const [ignoreDropdownTx, setIgnoreDropdownTx] = useState<string | null>(null)
   const [previewCandidate, setPreviewCandidate] = useState<MatchCandidate | null>(null)
@@ -247,6 +248,41 @@ export default function ReconciliationClient({ statementId }: { statementId: str
       console.error('Auto reconcile error:', e)
     }
     setAutoReconciling(false)
+  }
+
+  const handleClearAndRescan = async () => {
+    if (!confirm('Supprimer TOUTES les transactions de ce releve et re-parser le PDF ?\n\nLes rapprochements existants seront perdus. Le PDF est conserve.')) return
+    setRescanning(true)
+    try {
+      const clearRes = await authFetch(`/api/bank-statements/${statementId}/clear-transactions`, {
+        method: 'POST',
+      })
+      if (!clearRes.ok) {
+        const data = await clearRes.json().catch(() => ({}))
+        alert(`Erreur vidage : ${data.error || 'Echec'}`)
+        setRescanning(false)
+        return
+      }
+      const analyzeRes = await authFetch(`/api/bank-statements/${statementId}/analyze`, {
+        method: 'POST',
+      })
+      if (!analyzeRes.ok) {
+        const data = await analyzeRes.json().catch(() => ({}))
+        alert(`Erreur re-scan : ${data.error || 'Echec'}`)
+        setRescanning(false)
+        return
+      }
+      const result = await analyzeRes.json()
+      let msg = `Re-scan termine : ${result.transaction_count || 0} transactions`
+      if (result.type_corrections) msg += `\n${result.type_corrections} sens debit/credit corriges`
+      if (result.skipped_duplicates) msg += `\n${result.skipped_duplicates} doublons evites`
+      alert(msg)
+      await fetchData()
+    } catch (e) {
+      console.error('Clear+rescan error:', e)
+      alert('Erreur reseau pendant le re-scan')
+    }
+    setRescanning(false)
   }
 
   const handleIgnore = async (txId: string) => {
@@ -669,18 +705,33 @@ export default function ReconciliationClient({ statementId }: { statementId: str
               </div>
             </div>
           </div>
-          <button
-            onClick={handleAutoReconcile}
-            disabled={autoReconciling}
-            className="btn-primary flex items-center gap-2 disabled:opacity-50"
-          >
-            {autoReconciling ? (
-              <Loader2 className="h-4 w-4 animate-spin" />
-            ) : (
-              <Link className="h-4 w-4" />
-            )}
-            Lancer le rapprochement auto
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={handleClearAndRescan}
+              disabled={rescanning}
+              className="btn-secondary flex items-center gap-2 disabled:opacity-50"
+              title="Supprime toutes les transactions et re-parse le PDF avec le parseur ameliore"
+            >
+              {rescanning ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Trash2 className="h-4 w-4" />
+              )}
+              Vider + re-scanner
+            </button>
+            <button
+              onClick={handleAutoReconcile}
+              disabled={autoReconciling}
+              className="btn-primary flex items-center gap-2 disabled:opacity-50"
+            >
+              {autoReconciling ? (
+                <Loader2 className="h-4 w-4 animate-spin" />
+              ) : (
+                <Link className="h-4 w-4" />
+              )}
+              Lancer le rapprochement auto
+            </button>
+          </div>
         </div>
 
         {/* Summary bar */}
