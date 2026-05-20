@@ -45,7 +45,16 @@ export async function POST(
             type: 'text',
             text: `Extrais TOUTES les transactions de ce releve bancaire Credit Mutuel en JSON.
 
-Pour chaque ligne : date (YYYY-MM-DD), value_date (YYYY-MM-DD ou null), label (libelle court, premiere ligne sans details ICS/RUM), reference (null si absent), debit (nombre ou null), credit (nombre ou null).
+Pour chaque ligne : date (YYYY-MM-DD), value_date (YYYY-MM-DD ou null), label (libelle COMPLET avec marchand/tiers, voir regle), reference (null si absent), debit (nombre ou null), credit (nombre ou null).
+
+REGLE LIBELLE (TRES IMPORTANT) :
+- Garde TOUT le texte utile : nom commercant, type operation, beneficiaire/payeur
+- PAIEMENT CB XXXX -> inclus le marchand qui suit (ex "PAIEMENT CB 0604 UBER EATS")
+- VIR / PRLV -> inclus le tiers (ex "VIR SEPA EDF FRANCE", "PRLV SEPA URSSAF")
+- REMCB -> inclus numero de bordereau et detail si visible
+- Si libelle sur 2-3 lignes dans le PDF, CONCATENE en gardant le marchand
+- Ignore uniquement : ICS XXXXX, RUM XXXX, SCT XXXX, references techniques longues
+- Max 80 caracteres mais le marchand est prioritaire
 
 REGLE ABSOLUE debit/credit : regarde VISUELLEMENT dans quelle colonne le montant se trouve
 - Colonne "Debit EUROS" = debit (debit=nombre, credit=null)

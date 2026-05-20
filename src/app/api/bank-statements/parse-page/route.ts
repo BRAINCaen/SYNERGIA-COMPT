@@ -35,8 +35,17 @@ export async function POST(request: NextRequest) {
 Extrais TOUTES les transactions visibles dans le tableau. Chaque transaction a :
 - Date (colonne "Date")
 - Date valeur (colonne "Date valeur")
-- Libellé (colonne "Opération" - première ligne seulement, pas les détails ICS/RUM)
+- Libellé (colonne "Opération")
 - Montant dans la colonne "Débit EUROS" OU "Crédit EUROS"
+
+REGLE LIBELLE (TRES IMPORTANT) :
+- Garde TOUT le texte utile : nom du commercant, type d'operation, beneficiaire/payeur
+- Pour PAIEMENT CB XXXX : inclus IMPERATIVEMENT le nom du marchand qui suit (ex: "PAIEMENT CB 0604 UBER EATS", "PAIEMENT CB 0704 AMAZON FR")
+- Pour VIR/PRLV : inclus le nom du tiers (ex: "VIR SEPA EDF FRANCE", "PRLV SEPA URSSAF")
+- Pour REMCB : inclus le numero de bordereau ET le detail si visible
+- IGNORE uniquement les codes techniques : ICS XXXXX, RUM XXXX, SCT XXXX, numeros de reference longs (>10 chiffres seuls), "Date valeur"
+- Si le libelle s'etend sur 2-3 lignes dans le PDF, CONCATENE-les en gardant le nom du marchand
+- Longueur max : 80 caracteres mais GARDE le marchand en priorite
 
 REGLE ABSOLUE pour debit/credit : regarde VISUELLEMENT dans quelle colonne le montant se trouve
 - Colonne "Débit EUROS" (avant-dernière colonne) = debit (mets le montant dans debit, credit=null)
