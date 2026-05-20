@@ -86,6 +86,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [searching, setSearching] = useState(false)
   const [autoReconciling, setAutoReconciling] = useState(false)
   const [rescanning, setRescanning] = useState(false)
+  const [rescanProgress, setRescanProgress] = useState<string | null>(null)
   const [txSearch, setTxSearch] = useState('')
   const [ignoreDropdownTx, setIgnoreDropdownTx] = useState<string | null>(null)
   const [previewCandidate, setPreviewCandidate] = useState<MatchCandidate | null>(null)
@@ -254,6 +255,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     if (!confirm('Supprimer TOUTES les transactions de ce releve et re-parser le PDF ?\n\nLes rapprochements existants seront perdus. Le PDF est conserve.')) return
     setRescanning(true)
     try {
+      // Step 1 : clear
       const clearRes = await authFetch(`/api/bank-statements/${statementId}/clear-transactions`, {
         method: 'POST',
       })
@@ -263,26 +265,112 @@ export default function ReconciliationClient({ statementId }: { statementId: str
         setRescanning(false)
         return
       }
-      const analyzeRes = await authFetch(`/api/bank-statements/${statementId}/analyze`, {
-        method: 'POST',
-      })
-      if (!analyzeRes.ok) {
-        const data = await analyzeRes.json().catch(() => ({}))
-        alert(`Erreur re-scan : ${data.error || 'Echec'}`)
+
+      // Step 2 : get statement metadata (file_path + file_name)
+      const stmtRes = await authFetch(`/api/bank-statements/${statementId}`)
+      if (!stmtRes.ok) throw new Error('Statement non trouve')
+      const stmtData = await stmtRes.json()
+
+      // Step 3 : download the PDF/CSV
+      const proxyRes = await authFetch(`/api/proxy-pdf?path=${encodeURIComponent(stmtData.file_path)}`)
+      if (!proxyRes.ok) throw new Error('Telechargement du fichier echoue')
+      const fileBuffer = await proxyRes.arrayBuffer()
+
+      // Step 4 : parse (CSV deterministe ou PDF page par page via Claude Vision)
+      const fileName = (stmtData.file_name || '').toLowerCase()
+      const isCSV = fileName.endsWith('.csv')
+      let transactions: { date: string; label: string; debit: number | null; credit: number | null }[] = []
+
+      if (isCSV) {
+        let csvText = new TextDecoder('utf-8').decode(fileBuffer)
+        if (csvText.includes('�')) csvText = new TextDecoder('iso-8859-1').decode(fileBuffer)
+        const lines = csvText.split('\n').map(l => l.trim()).filter(Boolean)
+        for (let i = 1; i < lines.length; i++) {
+          const cols = lines[i].split(';')
+          if (cols.length < 5) continue
+          const dm = cols[0].match(/^(\d{2})\/(\d{2})\/(\d{4})$/)
+          if (!dm) continue
+          const isoDate = `${dm[3]}-${dm[2]}-${dm[1]}`
+          let debit: number | null = null, credit: number | null = null
+          if (cols[2]?.trim()) {
+            const v = parseFloat(cols[2].replace(/\s/g, '').replace(',', '.'))
+            if (!isNaN(v)) debit = Math.abs(Math.round(v * 100) / 100)
+          }
+          if (cols[3]?.trim()) {
+            const v = parseFloat(cols[3].replace(/\s/g, '').replace(',', '.'))
+            if (!isNaN(v)) credit = Math.round(v * 100) / 100
+          }
+          if ((debit === null && credit === null) || !cols[4]) continue
+          transactions.push({ date: isoDate, label: cols[4].split(/\s{2,}/)[0].substring(0, 80), debit, credit })
+        }
+      } else {
+        // PDF : render each page, send to parse-page (each call ~5-8s, well below timeout)
+        const pdfjsLib = await import('pdfjs-dist')
+        pdfjsLib.GlobalWorkerOptions.workerSrc = '/pdf.worker.min.mjs'
+        const pdf = await pdfjsLib.getDocument({ data: new Uint8Array(fileBuffer) }).promise
+        for (let i = 1; i <= pdf.numPages; i++) {
+          setRescanProgress(`page ${i}/${pdf.numPages}`)
+          try {
+            const page = await pdf.getPage(i)
+            const viewport = page.getViewport({ scale: 1.5 })
+            const canvas = document.createElement('canvas')
+            canvas.width = viewport.width
+            canvas.height = viewport.height
+            const ctx = canvas.getContext('2d')!
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            await (page as any).render({ canvasContext: ctx, viewport }).promise
+            const base64 = canvas.toDataURL('image/jpeg', 0.85).replace('data:image/jpeg;base64,', '')
+            const parseRes = await authFetch('/api/bank-statements/parse-page', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ image: base64, pageNum: i, totalPages: pdf.numPages }),
+            })
+            if (parseRes.ok) {
+              const data = await parseRes.json()
+              if (data.transactions?.length > 0) {
+                for (const t of data.transactions) {
+                  if (t.date?.includes('/')) {
+                    const [d, m, y] = t.date.split('/')
+                    if (y?.length === 4) t.date = `${y}-${m}-${d}`
+                  }
+                }
+                transactions = transactions.concat(data.transactions)
+              }
+            }
+          } catch { /* skip page */ }
+        }
+        setRescanProgress(null)
+      }
+
+      if (transactions.length === 0) {
+        alert('Aucune transaction trouvee dans le PDF')
         setRescanning(false)
         return
       }
-      const result = await analyzeRes.json()
-      let msg = `Re-scan termine : ${result.transaction_count || 0} transactions`
-      if (result.type_corrections) msg += `\n${result.type_corrections} sens debit/credit corriges`
+
+      // Step 5 : save (avec corrections deterministes + dedup automatiques)
+      const saveRes = await authFetch(`/api/bank-statements/${statementId}/save-transactions`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ transactions }),
+      })
+      if (!saveRes.ok) {
+        const data = await saveRes.json().catch(() => ({}))
+        throw new Error(data.error || 'Sauvegarde echouee')
+      }
+      const result = await saveRes.json()
+      let msg = `Re-scan termine : ${result.inserted_count || result.transaction_count || 0} transactions inserees`
+      if (result.type_corrections) msg += `\n${result.type_corrections} sens debit/credit corriges automatiquement`
       if (result.skipped_duplicates) msg += `\n${result.skipped_duplicates} doublons evites`
       alert(msg)
       await fetchData()
     } catch (e) {
       console.error('Clear+rescan error:', e)
-      alert('Erreur reseau pendant le re-scan')
+      const msg = e instanceof Error ? e.message : 'Erreur reseau'
+      alert(`Erreur re-scan : ${msg}`)
     }
     setRescanning(false)
+    setRescanProgress(null)
   }
 
   const handleIgnore = async (txId: string) => {
@@ -717,7 +805,7 @@ export default function ReconciliationClient({ statementId }: { statementId: str
               ) : (
                 <Trash2 className="h-4 w-4" />
               )}
-              Vider + re-scanner
+              {rescanning ? (rescanProgress || 'Re-scan...') : 'Vider + re-scanner'}
             </button>
             <button
               onClick={handleAutoReconcile}
