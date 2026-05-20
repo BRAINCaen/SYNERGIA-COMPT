@@ -22,6 +22,7 @@ import {
   Clock,
   ShieldOff,
   Eye,
+  ArrowUpDown,
 } from 'lucide-react'
 
 type TransactionStatus = 'matched' | 'unmatched' | 'ignored'
@@ -346,6 +347,62 @@ export default function ReconciliationClient({ statementId }: { statementId: str
       }
     } catch (e) {
       console.error('Unmatch error:', e)
+    }
+  }
+
+  const handleDeleteTx = async (tx: Transaction) => {
+    const amount = (tx.debit || 0) + (tx.credit || 0)
+    if (!confirm(`Supprimer cette transaction ?\n\n${tx.date} - ${tx.label}\n${fmt(amount)} (${(tx.debit || 0) > 0 ? 'debit' : 'credit'})\n\nA utiliser pour les doublons crees par le parseur PDF.`)) return
+    try {
+      const res = await authFetch(`/api/bank-statements/${statementId}/transactions/${tx.id}`, {
+        method: 'DELETE',
+      })
+      if (res.ok) {
+        setTransactions((prev) => prev.filter((t) => t.id !== tx.id))
+        // Update statement totals locally
+        setStatement((prev) => {
+          if (!prev) return prev
+          const isDebit = (tx.debit || 0) > 0
+          return {
+            ...prev,
+            transaction_count: Math.max(0, prev.transaction_count - 1),
+            total_debits: isDebit ? Math.max(0, prev.total_debits - amount) : prev.total_debits,
+            total_credits: !isDebit ? Math.max(0, prev.total_credits - amount) : prev.total_credits,
+          }
+        })
+      } else {
+        const data = await res.json().catch(() => ({}))
+        alert(`Erreur : ${data.error || 'Echec suppression'}`)
+      }
+    } catch (e) {
+      console.error('Delete tx error:', e)
+    }
+  }
+
+  const handleFlipType = async (tx: Transaction) => {
+    if (!confirm('Inverser debit/credit pour cette transaction ?\n(A utiliser quand le parseur PDF s\'est trompe.)')) return
+    try {
+      const res = await authFetch(`/api/bank-statements/${statementId}/transactions/${tx.id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ flip_type: true }),
+      })
+      if (res.ok) {
+        setTransactions((prev) =>
+          prev.map((t) => {
+            if (t.id !== tx.id) return t
+            const amount = (t.debit || 0) + (t.credit || 0)
+            const wasDebit = (t.debit || 0) > 0
+            return {
+              ...t,
+              debit: wasDebit ? null : amount,
+              credit: wasDebit ? amount : null,
+            }
+          })
+        )
+      }
+    } catch (e) {
+      console.error('Flip type error:', e)
     }
   }
 
@@ -912,6 +969,20 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                             Restaurer
                           </button>
                         )}
+                        <button
+                          onClick={() => handleFlipType(tx)}
+                          className="rounded p-1 text-gray-600 hover:bg-accent-orange/10 hover:text-accent-orange transition-colors"
+                          title="Inverser debit/credit (erreur de parseur PDF)"
+                        >
+                          <ArrowUpDown className="h-3.5 w-3.5" />
+                        </button>
+                        <button
+                          onClick={() => handleDeleteTx(tx)}
+                          className="rounded p-1 text-gray-600 hover:bg-accent-red/10 hover:text-accent-red transition-colors"
+                          title="Supprimer la transaction (doublon parseur PDF)"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </button>
                       </div>
                     </td>
                   </tr>
