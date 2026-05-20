@@ -38,15 +38,23 @@ Extrais TOUTES les transactions visibles dans le tableau. Chaque transaction a :
 - Libellé (colonne "Opération" - première ligne seulement, pas les détails ICS/RUM)
 - Montant dans la colonne "Débit EUROS" OU "Crédit EUROS"
 
-IMPORTANT : regarde VISUELLEMENT dans quelle colonne se trouve le montant :
-- Colonne "Débit EUROS" (avant-dernière) = argent qui sort = debit
-- Colonne "Crédit EUROS" (dernière) = argent qui entre = credit
+REGLE ABSOLUE pour debit/credit : regarde VISUELLEMENT dans quelle colonne le montant se trouve
+- Colonne "Débit EUROS" (avant-dernière colonne) = debit (mets le montant dans debit, credit=null)
+- Colonne "Crédit EUROS" (dernière colonne) = credit (mets le montant dans credit, debit=null)
+- Si tu hésites, applique ces règles métier strictes :
+  * REMCB / REMISE CHEQUE / REMISE TICKETS = TOUJOURS credit
+  * VIR PAYPAL PTE LTD = TOUJOURS credit (encaissements iZettle)
+  * VIR EDENRED / CAP LOISIRS / LUDOBOX / FUNBOOKER / ASP / DRFIP = TOUJOURS credit
+  * PRLV SEPA / PAIEMENT CB / FRAIS / COMCB / ECH PRET / INTERETS = TOUJOURS debit
+  * VIR SEPA ACOMPTE / SALAIRE / LOYER / FORFAIT = TOUJOURS debit (versement vers tiers)
+  * VIR BOEHME ALLAN = debit (gérant qui retire)
+- Ne JAMAIS extraire la même ligne deux fois (une fois en debit, une fois en credit) : c'est forcément une erreur
 
-Exclure : SOLDE CREDITEUR, Total des mouvements, en-têtes, pieds de page.
+Exclure : SOLDE CREDITEUR, SOLDE DEBITEUR, Total des mouvements, Report, en-têtes de colonne, pieds de page.
 
 Réponds UNIQUEMENT en JSON :
 [{"date":"DD/MM/YYYY","date_valeur":"DD/MM/YYYY","label":"libellé","debit":nombre_ou_null,"credit":nombre_ou_null}]
-Montants en nombres avec point décimal (1234.56).`
+Montants en nombres avec point décimal (1234.56). Jamais de symbole €, jamais d'espace dans les nombres.`
           }
         ],
       }],
