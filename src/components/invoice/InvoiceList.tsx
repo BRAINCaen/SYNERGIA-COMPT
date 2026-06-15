@@ -1089,7 +1089,20 @@ function InvoiceTable({
                 />
               </td>
               <td className="px-4 py-3">
-                <Link href={`/invoices/${invoice.id}`} className="flex items-center gap-2 text-sm font-medium text-accent-green hover:text-accent-green">
+                <Link
+                  href={`/invoices/${invoice.id}`}
+                  onClick={() => {
+                    // Store the current filtered list order so prev/next on the detail page
+                    // navigates only through the visible (filtered) subset.
+                    try {
+                      const ids = invoices.map((i) => i.id)
+                      sessionStorage.setItem('invNav.ids', JSON.stringify(ids))
+                      sessionStorage.setItem('invNav.ts', String(Date.now()))
+                      sessionStorage.setItem('invNav.filtered', '1')
+                    } catch { /* */ }
+                  }}
+                  className="flex items-center gap-2 text-sm font-medium text-accent-green hover:text-accent-green"
+                >
                   <FileText className="h-4 w-4 flex-shrink-0" />
                   <span className="max-w-[200px] truncate">{invoice.file_name}</span>
                 </Link>

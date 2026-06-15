@@ -78,6 +78,12 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   // Load all invoice IDs for prev/next navigation (cached in sessionStorage)
   useEffect(() => {
     if (!user) return
+
+    // If the cached order was stored by a filtered list view, respect it and skip
+    // the "load all invoices" fetch — prev/next must stay within the filtered subset.
+    const isFiltered = typeof window !== 'undefined' && sessionStorage.getItem('invNav.filtered') === '1'
+    if (isFiltered && allInvoiceIds.length > 0) return
+
     // Check cache age — refresh only every 2 minutes
     const cacheTime = typeof window !== 'undefined' ? Number(sessionStorage.getItem('invNav.ts') || 0) : 0
     const isCacheFresh = cacheTime && Date.now() - cacheTime < 120_000
@@ -99,6 +105,7 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
           if (typeof window !== 'undefined') {
             sessionStorage.setItem('invNav.ids', JSON.stringify(ids))
             sessionStorage.setItem('invNav.ts', String(Date.now()))
+            sessionStorage.removeItem('invNav.filtered')
           }
         }
       } catch { /* */ }
