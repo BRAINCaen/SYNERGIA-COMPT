@@ -27,6 +27,11 @@ interface BankStatement {
   total_credits: number
   status: 'pending' | 'parsed' | 'reconciling' | 'completed' | 'error'
   created_at: string
+  matched_count?: number
+  ignored_count?: number
+  treated_count?: number
+  remaining_count?: number
+  match_percent?: number
 }
 
 interface MonthlySummary {
@@ -644,6 +649,34 @@ export default function BankClient() {
                           {fmt(st.total_credits)} credits
                         </span>
                       </div>
+                      {/* Reconciliation progress */}
+                      {(st.transaction_count > 0 || (st.treated_count ?? 0) > 0) && (() => {
+                        const treated = st.treated_count ?? 0
+                        const total = st.transaction_count || 0
+                        const remaining = st.remaining_count ?? Math.max(0, total - treated)
+                        const percent = st.match_percent ?? (total > 0 ? Math.round((treated / total) * 100) : 0)
+                        const colorClass = percent >= 95 ? 'text-accent-green' : percent >= 60 ? 'text-accent-orange' : 'text-accent-red'
+                        const barColor = percent >= 95 ? 'bg-accent-green' : percent >= 60 ? 'bg-accent-orange' : 'bg-accent-red'
+                        return (
+                          <div className="mt-2 flex items-center gap-3">
+                            <div className="flex items-center gap-1.5 min-w-[140px]">
+                              <div className="h-1.5 flex-1 overflow-hidden rounded-full bg-dark-input">
+                                <div className={`h-full ${barColor} transition-all`} style={{ width: `${percent}%` }} />
+                              </div>
+                              <span className={`text-xs font-mono font-bold ${colorClass}`}>{percent}%</span>
+                            </div>
+                            <span className="text-xs text-gray-500">
+                              <span className="text-accent-green font-medium">{st.matched_count ?? 0} rapprochees</span>
+                              {(st.ignored_count ?? 0) > 0 && (
+                                <span className="text-gray-400"> + {st.ignored_count} ignorees</span>
+                              )}
+                              {remaining > 0 && (
+                                <span className="text-accent-red font-medium"> · {remaining} reste</span>
+                              )}
+                            </span>
+                          </div>
+                        )
+                      })()}
                     </div>
                   </div>
 
