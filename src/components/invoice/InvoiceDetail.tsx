@@ -48,6 +48,9 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [bankTransactions, setBankTransactions] = useState<any[]>([])
   const [bankSearching, setBankSearching] = useState(false)
   const [bankMatched, setBankMatched] = useState<string | null>(null)
+  // Lookup map for "Deja liee" badge : invoice_id / revenue_id -> { name, kind }
+  // Filled when the bank-match panel opens so users see which doc holds a transaction.
+  const [linkedDocsMap, setLinkedDocsMap] = useState<Map<string, { name: string; kind: 'invoice' | 'revenue' }>>(new Map())
   const [bankMatchCount, setBankMatchCount] = useState(0)
   const [matchedTxDetails, setMatchedTxDetails] = useState<any[]>([])
   const [selectedBankTxIds, setSelectedBankTxIds] = useState<string[]>([])
@@ -926,6 +929,46 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                     !(Array.isArray(tx.additional_invoice_ids) && tx.additional_invoice_ids.includes(invoiceId))
                   )
                   setBankTransactions(txs)
+
+                  // Build lookup map for "Deja liee" badge : collect linked invoice/revenue IDs
+                  // and fetch their supplier names so users can see which doc holds each tx.
+                  const linkedInvIds = new Set<string>()
+                  const linkedRevIds = new Set<string>()
+                  for (const tx of txs) {
+                    if (tx.matched_invoice_id) linkedInvIds.add(tx.matched_invoice_id)
+                    if (Array.isArray(tx.additional_invoice_ids)) {
+                      for (const id of tx.additional_invoice_ids) linkedInvIds.add(id)
+                    }
+                    if (tx.matched_revenue_id) linkedRevIds.add(tx.matched_revenue_id)
+                  }
+                  if (linkedInvIds.size > 0 || linkedRevIds.size > 0) {
+                    const map = new Map<string, { name: string; kind: 'invoice' | 'revenue' }>()
+                    try {
+                      const [invRes, revRes] = await Promise.all([
+                        linkedInvIds.size > 0 ? authFetch('/api/invoices') : Promise.resolve(null),
+                        linkedRevIds.size > 0 ? authFetch('/api/revenue') : Promise.resolve(null),
+                      ])
+                      if (invRes && invRes.ok) {
+                        const invs = await invRes.json()
+                        for (const inv of (Array.isArray(invs) ? invs : invs.invoices || [])) {
+                          if (linkedInvIds.has(inv.id)) {
+                            const name = inv.supplier_name || inv.invoice_number || inv.file_name || 'Facture'
+                            map.set(inv.id, { name, kind: 'invoice' })
+                          }
+                        }
+                      }
+                      if (revRes && revRes.ok) {
+                        const revs = await revRes.json()
+                        for (const rev of (Array.isArray(revs) ? revs : revs.revenues || [])) {
+                          if (linkedRevIds.has(rev.id)) {
+                            const name = rev.client_name || rev.description || rev.file_name || 'Encaissement'
+                            map.set(rev.id, { name, kind: 'revenue' })
+                          }
+                        }
+                      }
+                    } catch { /* */ }
+                    setLinkedDocsMap(map)
+                  }
                 }
               } catch (e) {
                 console.error('Fetch bank transactions error:', e)
@@ -1174,11 +1217,32 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                         <div className="min-w-0 flex-1">
                           <div className="flex items-center gap-2">
                             <p className="truncate text-sm text-gray-200">{tx.label}</p>
-                            {tx.match_status === 'matched' && (
-                              <span className="shrink-0 rounded bg-accent-orange/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent-orange" title="Deja rapprochee a une autre facture">
-                                Deja liee
-                              </span>
-                            )}
+                            {tx.match_status === 'matched' && (() => {
+                              const linkedId = tx.matched_invoice_id || tx.matched_revenue_id
+                              const linkedInfo = linkedId ? linkedDocsMap.get(linkedId) : undefined
+                              const href = linkedId
+                                ? (linkedInfo?.kind === 'revenue' ? `/revenue/${linkedId}` : `/invoices/${linkedId}`)
+                                : null
+                              return (
+                                <span className="shrink-0 inline-flex items-center gap-1">
+                                  <span className="rounded bg-accent-orange/20 px-1.5 py-0.5 text-[10px] font-bold uppercase text-accent-orange">
+                                    Deja liee
+                                  </span>
+                                  {href && (
+                                    <a
+                                      href={href}
+                                      target="_blank"
+                                      rel="noopener noreferrer"
+                                      onClick={(e) => e.stopPropagation()}
+                                      className="rounded bg-accent-orange/10 px-1.5 py-0.5 text-[10px] text-accent-orange hover:bg-accent-orange/20 hover:underline truncate max-w-[180px]"
+                                      title={linkedInfo ? `Ouvrir ${linkedInfo.kind === 'revenue' ? 'l’encaissement' : 'la facture'} dans un nouvel onglet` : 'Ouvrir dans un nouvel onglet'}
+                                    >
+                                      {linkedInfo ? `→ ${linkedInfo.name}` : '→ voir'}
+                                    </a>
+                                  )}
+                                </span>
+                              )
+                            })()}
                           </div>
                           <p className="text-xs text-gray-500 font-mono">
                             {tx.date ? new Date(tx.date).toLocaleDateString('fr-FR') : '-'}
