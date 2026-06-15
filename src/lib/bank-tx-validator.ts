@@ -27,20 +27,47 @@ export function forceTypeFromLabel(label: string): 'debit' | 'credit' | null {
 }
 
 /**
- * Normalize a label for dedup fingerprinting :
- * - uppercase + strip accents
+ * Normalize a label for dedup fingerprinting.
+ * Goal : two labels referring to the same merchant/operation collide,
+ * even if the parser captured slightly different suffixes.
+ *
+ * Strategy :
+ * - uppercase + strip accents + strip punctuation
+ * - strip prefixes that don't identify the merchant (SEPA, INST, CB XXXX)
+ * - strip generic legal suffixes (SARL, SAS, EURL, SA, EU, FRANCE, ...)
  * - strip variable refs (REF/NUM/ID/RUM/VU.../CU.../SCT...)
  * - strip long numbers (8+ digits = IDs)
- * - first 40 chars
+ * - keep first 3 meaningful words after the operation type (e.g. "PRLV AMAZON" or
+ *   "PAIEMENT CB UBER EATS"), max 25 chars
  */
 export function normalizeLabel(s: string): string {
-  return (s || '').toUpperCase()
+  let n = (s || '').toUpperCase()
     .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[,.\-_/]/g, ' ')
     .replace(/\b(REF|NUM|ID|RUM|VU\d+|CU\d+|SCT\w+)\s*\S*/gi, '')
     .replace(/\d{8,}/g, '')
+    .replace(/\bCB\s+\d{2,4}\b/g, '') // strip "CB 0604" card-number suffix
+    .replace(/\b(SEPA|INST|INTERNATIONAL)\b/g, '')
+    .replace(/\b(SARL|SAS|EURL|SA|SASU|EU|SUCCURSALE|SUCCU|FRANCAISE|FRANCAIS|FRANCE|LIMITED|LTD|LLC|INC|GMBH|SARL,?)\b/g, '')
     .replace(/\s+/g, ' ')
     .trim()
-    .slice(0, 40)
+
+  // Keep operation prefix (PRLV/VIR/PAIEMENT/REMCB) + first 2-3 distinct merchant words
+  const parts = n.split(' ').filter(Boolean)
+  const opPrefixes = new Set(['PRLV', 'VIR', 'PAIEMENT', 'REMCB', 'COMCB', 'FRAIS', 'ECH', 'INTERETS'])
+  const out: string[] = []
+  const seenMerchantWords = new Set<string>()
+  for (const word of parts) {
+    if (opPrefixes.has(word)) {
+      out.push(word)
+      continue
+    }
+    if (seenMerchantWords.has(word)) continue // skip duplicate words (parser noise)
+    seenMerchantWords.add(word)
+    out.push(word)
+    if (seenMerchantWords.size >= 3) break
+  }
+  return out.join(' ').slice(0, 25)
 }
 
 /**

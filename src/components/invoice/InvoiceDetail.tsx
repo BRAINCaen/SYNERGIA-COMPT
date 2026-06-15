@@ -52,7 +52,6 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
   const [matchedTxDetails, setMatchedTxDetails] = useState<any[]>([])
   const [selectedBankTxIds, setSelectedBankTxIds] = useState<string[]>([])
   const [bankMatching, setBankMatching] = useState(false)
-  const [includeMatchedTx, setIncludeMatchedTx] = useState(false)
 
   // Supplier auto-classify
   const [supplierId, setSupplierId] = useState<string | null>(null)
@@ -909,13 +908,12 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
               setShowBankMatch(true)
               setBankSearching(true)
               try {
-                const url = includeMatchedTx
-                  ? '/api/bank-statements/transactions'
-                  : '/api/bank-statements/transactions?match_status=unmatched'
-                const res = await authFetch(url)
+                // Always fetch ALL transactions — show matched ones with a "deja liee" badge
+                // so the user sees conflicts directly instead of having to toggle a checkbox.
+                const res = await authFetch('/api/bank-statements/transactions')
                 if (res.ok) {
                   const data = await res.json()
-                  // Filter out transactions already linked to THIS invoice
+                  // Filter out transactions already linked to THIS specific invoice
                   const txs = (data.transactions || data || []).filter((tx: any) =>
                     tx.matched_invoice_id !== invoiceId &&
                     !(Array.isArray(tx.additional_invoice_ids) && tx.additional_invoice_ids.includes(invoiceId))
@@ -1133,47 +1131,18 @@ export default function InvoiceDetail({ invoiceId, pcgAccounts }: InvoiceDetailP
                 </div>
 
                 {/* Toggle: include already-matched transactions */}
-                <label className="flex items-center gap-2 cursor-pointer text-xs">
-                  <input
-                    type="checkbox"
-                    checked={includeMatchedTx}
-                    onChange={async () => {
-                      const newVal = !includeMatchedTx
-                      setIncludeMatchedTx(newVal)
-                      setBankSearching(true)
-                      try {
-                        const url = newVal
-                          ? '/api/bank-statements/transactions'
-                          : '/api/bank-statements/transactions?match_status=unmatched'
-                        const res = await authFetch(url)
-                        if (res.ok) {
-                          const data = await res.json()
-                          const txs = (data.transactions || data || []).filter((tx: any) =>
-                            tx.matched_invoice_id !== invoiceId &&
-                            !(Array.isArray(tx.additional_invoice_ids) && tx.additional_invoice_ids.includes(invoiceId))
-                          )
-                          setBankTransactions(txs)
-                        }
-                      } catch { /* */ }
-                      setBankSearching(false)
-                    }}
-                    className="h-3.5 w-3.5 rounded border-dark-border bg-dark-input text-accent-orange focus:ring-accent-orange/50"
-                  />
-                  <span className="text-gray-400">
-                    Inclure les transactions <strong className="text-accent-orange">deja rapprochees a d&apos;autres factures</strong>
-                  </span>
-                  <span className="text-gray-600 italic">(utile pour un virement groupe / prelevement couvrant plusieurs factures)</span>
-                </label>
-
                 {matchingTx.length > 0 && (
                   <p className="text-xs font-medium text-accent-green">
                     {matchingTx.length} transaction(s) avec montant exact (+/- 0.01€)
+                    <span className="ml-2 text-gray-500 italic font-normal">
+                      — celles marquees <span className="text-accent-orange font-bold">Deja liee</span> sont rapprochees a une autre facture
+                    </span>
                   </p>
                 )}
 
                 <div className="max-h-64 space-y-1 overflow-y-auto">
                   {filtered.length === 0 && (
-                    <p className="py-6 text-center text-sm text-gray-500">Aucune transaction non rapprochee trouvee.</p>
+                    <p className="py-6 text-center text-sm text-gray-500">Aucune transaction trouvee.</p>
                   )}
                   {filtered.map((tx: any) => {
                     const isMatch = allAmounts.some((a: number) => Math.abs(tx.amount - a) <= 0.01)
