@@ -2,6 +2,7 @@ export const dynamic = 'force-dynamic'
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb } from '@/lib/firebase/admin'
+import { fingerprint } from '@/lib/bank-tx-validator'
 
 /**
  * Find duplicate bank transactions (same date + amount + label/reference).
@@ -22,39 +23,20 @@ export async function POST(request: NextRequest) {
       .where('user_id', '==', decoded.uid)
       .get()
 
-    // Normalize label: uppercase, strip accents, collapse whitespace, remove non-alphanumeric
-    const normalizeLabel = (s: string) =>
-      s.toUpperCase()
-        .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/\s+/g, ' ')
-        .trim()
-
-    // Group transactions by fingerprint
+    // Group transactions by fingerprint \u2014 uses the SHARED bank-tx-validator helper
+    // so insertion-time dedup and retroactive dedup behave identically.
     type Doc = FirebaseFirestore.QueryDocumentSnapshot
     const groups = new Map<string, Doc[]>()
-
-    // Take only first N significant chars of label (handles slight differences)
-    const labelKey = (label: string) => {
-      const norm = normalizeLabel(label)
-      // First 30 chars after stripping common variable suffixes (refs, IDs)
-      return norm
-        .replace(/\b(REF|NUM|ID|RUM|VU\d+|CU\d+|SCT\w+)\s*\S*/gi, '') // strip variable refs
-        .replace(/\d{8,}/g, '') // strip long numbers (IDs)
-        .replace(/\s+/g, ' ')
-        .trim()
-        .slice(0, 40)
-    }
 
     for (const doc of snap.docs) {
       const data = doc.data()
       const date = (data.date || '').toString().slice(0, 10)
-      const amount = data.amount != null ? Number(data.amount).toFixed(2) : ''
-      const label = labelKey((data.label || '').toString())
-      const type = data.type || ''
-      if (!date || !amount || !label) continue
+      const amount = Number(data.amount) || 0
+      const type = (data.type as 'debit' | 'credit') || 'debit'
+      const label = (data.label || '').toString()
+      if (!date || amount === 0 || !label) continue
 
-      // Fingerprint: date + amount + type + normalized truncated label
-      const fp = `${date}|${type}|${amount}|${label}`
+      const fp = fingerprint(date, type, amount, label)
       if (!groups.has(fp)) groups.set(fp, [])
       groups.get(fp)!.push(doc)
     }
