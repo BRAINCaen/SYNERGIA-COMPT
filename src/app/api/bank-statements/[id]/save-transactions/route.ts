@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb } from '@/lib/firebase/admin'
-import { forceTypeFromLabel, normalizeLabel } from '@/lib/bank-tx-validator'
+import { forceTypeFromLabel, normalizeLabel, isPrefixOrSuperset } from '@/lib/bank-tx-validator'
 
 export const dynamic = 'force-dynamic'
 
@@ -46,6 +46,44 @@ export async function POST(
         }
       })
     }
+
+    // PRE-PASS : merge intra-batch duplicates where one label is a prefix of another
+    // at the same date+amount+type. Caused by PDF parser splitting one row into
+    // 2 transactions (1ere ligne "PAIEMENT CB ... IRELAND" + 2eme ligne "WWW.3MINUTES...").
+    // We keep the one with the longest label (most informative).
+    type RawTx = { date: string; label: string; debit: number | null; credit: number | null; type?: string }
+    const byKey = new Map<string, RawTx[]>()
+    for (const t of transactions as RawTx[]) {
+      const isDebit = t.debit != null && t.debit > 0
+      const amount = Math.abs(t.debit ?? t.credit ?? 0)
+      if (amount === 0) continue
+      const key = `${(t.date || '').slice(0, 10)}|${isDebit ? 'debit' : 'credit'}|${amount.toFixed(2)}`
+      if (!byKey.has(key)) byKey.set(key, [])
+      byKey.get(key)!.push(t)
+    }
+    let prefixMergedCount = 0
+    const dedupedTransactions: RawTx[] = []
+    for (const [, group] of byKey.entries()) {
+      if (group.length === 1) {
+        dedupedTransactions.push(group[0])
+        continue
+      }
+      // Sort longest-label first ; greedy keep until no prefix-match found
+      const sorted = [...group].sort((a, b) => (b.label || '').length - (a.label || '').length)
+      const kept: RawTx[] = []
+      for (const candidate of sorted) {
+        const isDup = kept.some((k) => isPrefixOrSuperset(k.label || '', candidate.label || ''))
+        if (isDup) {
+          prefixMergedCount++
+          continue
+        }
+        kept.push(candidate)
+      }
+      dedupedTransactions.push(...kept)
+    }
+    // Replace input
+    transactions.length = 0
+    transactions.push(...dedupedTransactions)
 
     // Fetch existing transactions for this statement to skip duplicates on re-parse
     const existingSnap = await adminDb
@@ -163,6 +201,7 @@ export async function POST(
       transaction_count: finalCount,
       inserted_count: insertedCount,
       skipped_duplicates: skippedDupCount,
+      prefix_merged: prefixMergedCount,
       type_corrections: forcedCount,
       total_debits: finalDebits,
       total_credits: finalCredits,

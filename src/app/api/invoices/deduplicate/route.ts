@@ -24,9 +24,19 @@ export async function POST(request: NextRequest) {
     const normalizeSupplier = (s: string) =>
       s.toUpperCase()
         .normalize('NFD').replace(/[\u0300-\u036f]/g, '')
-        .replace(/\([^)]*\)/g, '') // remove "(INPI)", "(S.A.P.N.)"
+        .replace(/\([^)]*\)/g, '')
         .replace(/[^A-Z0-9]/g, '')
         .trim()
+
+    // Get the "supplier core" : the supplier name without role suffixes after a dash.
+    // "3 minutes pizza - Chef Christophe" -> "3MINUTESPIZZA"
+    // "3 minutes pizza - Chef Pizzaiolo Christophe" -> "3MINUTESPIZZA"
+    // "3 minutes pizza" -> "3MINUTESPIZZA"
+    // All 3 collapse to the same core -> caught as duplicate when date+amount match.
+    const supplierCore = (s: string) => {
+      const before = (s || '').split(/\s*[\-\u2014,]\s*/)[0] // cut at first dash/comma
+      return normalizeSupplier(before)
+    }
 
     for (const doc of snap.docs) {
       const data = doc.data()
@@ -70,15 +80,27 @@ export async function POST(request: NextRequest) {
       // Strategy 2: NORMALIZED supplier match — normalized supplier + invoice_number + amount + month
       const normalizedFingerprint = supplier ? `SUP|${supplier}|${invoiceNum}|${totalTtc}|${date}` : null
 
+      // Strategy 3 : SUPPLIER CORE match - core supplier name (before any dash/comma)
+      // + same exact day + same amount. Catches the "3 minutes pizza" + "3 minutes pizza
+      // - Chef Christophe" + "3 minutes pizza - Chef Pizzaiolo Christophe" case where the
+      // AI extracted slightly different supplier names for the same physical ticket.
+      const core = supplierCore((data.supplier_name || '').toString())
+      const exactDate = (data.invoice_date || '').toString().slice(0, 10) // YYYY-MM-DD
+      const coreFingerprint = core && core.length >= 4 && totalTtc && exactDate
+        ? `CORE|${core}|${totalTtc}|${exactDate}`
+        : null
+
       const strongMatch = strongFingerprint && seen.has(strongFingerprint)
       const normalizedMatch = normalizedFingerprint && seen.has(normalizedFingerprint)
+      const coreMatch = coreFingerprint && seen.has(coreFingerprint)
 
-      if (strongMatch || normalizedMatch) {
+      if (strongMatch || normalizedMatch || coreMatch) {
         duplicateIds.push(doc.id)
-        duplicateDetails.push(`${data.file_name || doc.id} (${data.supplier_name || '?'} ${totalTtc}EUR ${invoiceNum})`)
+        duplicateDetails.push(`${data.file_name || doc.id} (${data.supplier_name || '?'} ${totalTtc}EUR ${exactDate}${coreMatch && !strongMatch && !normalizedMatch ? ' [core]' : ''})`)
       } else {
         if (strongFingerprint) seen.set(strongFingerprint, { id: doc.id, created_at: data.created_at || '' })
         if (normalizedFingerprint) seen.set(normalizedFingerprint, { id: doc.id, created_at: data.created_at || '' })
+        if (coreFingerprint) seen.set(coreFingerprint, { id: doc.id, created_at: data.created_at || '' })
       }
     }
 

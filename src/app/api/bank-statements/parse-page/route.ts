@@ -47,6 +47,17 @@ REGLE LIBELLE (TRES IMPORTANT) :
 - Si le libelle s'etend sur 2-3 lignes dans le PDF, CONCATENE-les en gardant le nom du marchand
 - Longueur max : 80 caracteres mais GARDE le marchand en priorite
 
+REGLE ANTI-DOUBLON CRITIQUE (TRES IMPORTANT) :
+- Une "transaction" = UNE LIGNE de mouvement dans le tableau. Pas une ligne typographique.
+- Une operation PAIEMENT CB s'etend SOUVENT sur 2 lignes typographiques :
+  * Ligne 1 : "PAIEMENT CB 2605 IE IRELAND"
+  * Ligne 2 : "WWW.3MINUTESPIZZ CARD ABCD" (nom du marchand)
+  * Ces 2 lignes typographiques = UNE SEULE transaction. Concatene les libelles.
+  * Tu dois renvoyer UN SEUL objet JSON avec le libelle complet "PAIEMENT CB 2605 IE IRELAND WWW.3MINUTESPIZZ", PAS deux.
+- Idem pour PRLV SEPA : la 1ere ligne contient PRLV SEPA, la 2eme contient le nom du beneficiaire. UNE seule transaction.
+- Si tu vois 2 transactions avec EXACTEMENT la meme date ET le meme montant, l'une est probablement une partie de l'autre — verifie et n'en garde qu'UNE avec le libelle le plus complet.
+- Ne renvoie JAMAIS deux transactions identiques en (date, montant, sens debit/credit)
+
 REGLE ABSOLUE pour debit/credit : regarde VISUELLEMENT dans quelle colonne le montant se trouve
 - Colonne "Débit EUROS" (avant-dernière colonne) = debit (mets le montant dans debit, credit=null)
 - Colonne "Crédit EUROS" (dernière colonne) = credit (mets le montant dans credit, debit=null)

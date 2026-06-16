@@ -83,3 +83,43 @@ export function fingerprint(
   const dateKey = (date || '').toString().slice(0, 10)
   return `${dateKey}|${type}|${amount.toFixed(2)}|${normalizeLabel(label)}`
 }
+
+/**
+ * "Same-line" fingerprint : only date + type + amount, IGNORES the label.
+ * Two transactions sharing this fingerprint are CANDIDATES for being the same
+ * real bank movement extracted twice by the PDF parser (one row split across
+ * 2 typographic lines → 2 transactions with overlapping labels).
+ * Always use isPrefixOrSuperset() to confirm before deleting.
+ */
+export function sameLineFingerprint(
+  date: string,
+  type: 'debit' | 'credit',
+  amount: number
+): string {
+  const dateKey = (date || '').toString().slice(0, 10)
+  return `${dateKey}|${type}|${amount.toFixed(2)}`
+}
+
+/**
+ * Returns true if one of the two labels is a prefix of the other after
+ * normalisation (uppercase, strip ponctuation, collapse whitespace).
+ * Used to detect "PAIEMENT CB 2605 IE IRELAND" being part of
+ * "PAIEMENT CB 2605 IE IRELAND WWW.3MINUTESPIZZ" — the parser split one row
+ * into two transactions, the longer one is the true label.
+ */
+export function isPrefixOrSuperset(a: string, b: string): boolean {
+  const norm = (s: string) => (s || '').toUpperCase()
+    .normalize('NFD').replace(/[̀-ͯ]/g, '')
+    .replace(/[,.\-_/]/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+  const na = norm(a)
+  const nb = norm(b)
+  if (!na || !nb) return false
+  if (na === nb) return true
+  // Require minimum overlap to avoid false positives on tiny labels
+  const shorter = na.length < nb.length ? na : nb
+  const longer = na.length < nb.length ? nb : na
+  if (shorter.length < 6) return false
+  return longer.startsWith(shorter + ' ') || longer.startsWith(shorter)
+}
