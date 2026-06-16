@@ -585,6 +585,40 @@ export default function ReconciliationClient({ statementId }: { statementId: str
       .finally(() => setSearching(false))
   }
 
+  // Fetch revenue entries (separate collection) and merge with invoice candidates.
+  // Filter by amount tolerance — server-side filtering not available for revenueEntries.
+  const fetchRevenueCandidates = async (amount: number, query: string): Promise<MatchCandidate[]> => {
+    try {
+      const res = await authFetch('/api/revenue')
+      if (!res.ok) return []
+      const data = await res.json()
+      const list = Array.isArray(data) ? data : (data.revenues || data.entries || [])
+      const q = query.toLowerCase().trim()
+      const tolerance = Math.max(0.5, amount * 0.001) // 0.5 EUR or 0.1% whichever larger
+      return list
+        .filter((rev: any) => {
+          const a = Math.abs(Number(rev.amount_ttc) || 0)
+          if (amount > 0 && Math.abs(a - amount) > tolerance) return false
+          if (q) {
+            const haystack = `${rev.entity_name || ''} ${rev.description || ''} ${rev.file_name || ''} ${rev.reference || ''}`.toLowerCase()
+            if (!haystack.includes(q)) return false
+          }
+          return true
+        })
+        .map((rev: any) => ({
+          id: rev.id,
+          type: 'revenue' as const,
+          name: rev.entity_name || rev.description || rev.file_name || 'Encaissement',
+          amount: Number(rev.amount_ttc) || 0,
+          date: rev.date || '',
+          file_name: rev.file_name || '',
+        }))
+    } catch (e) {
+      console.error('Fetch revenue candidates error:', e)
+      return []
+    }
+  }
+
   const openMatchModal = async (tx: Transaction) => {
     setMatchModalTx(tx)
     setSearchQuery('')
@@ -592,15 +626,23 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     setSearchResults([])
     setSelectedCandidateIds([])
 
-    // Auto-load ALL invoices sorted by closest amount
+    // Load invoices + revenue entries in parallel, then merge
     try {
       const amount = tx.debit || tx.credit || 0
       const txType = showAllDocs ? '' : (tx.debit ? 'debit' : 'credit')
       const typeParam = txType ? `&type=${txType}` : ''
-      const res = await authFetch(`/api/invoices/search?amount=${amount}${typeParam}`)
-      if (res.ok) {
-        const data = await res.json()
-        const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
+      const isCredit = !!tx.credit
+
+      const [invRes, revenueCandidates] = await Promise.all([
+        authFetch(`/api/invoices/search?amount=${amount}${typeParam}`),
+        // Only fetch revenue entries for credit transactions (encaissements match credits)
+        isCredit || showAllDocs ? fetchRevenueCandidates(amount, '') : Promise.resolve([] as MatchCandidate[]),
+      ])
+
+      let invoiceCandidates: MatchCandidate[] = []
+      if (invRes.ok) {
+        const data = await invRes.json()
+        invoiceCandidates = (data.invoices || []).map((inv: any) => ({
           id: inv.id,
           type: (inv.document_type === 'revenue' || inv.document_type === 'credit_note') ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
           name: inv.supplier_name || inv.file_name || 'Sans nom',
@@ -608,10 +650,15 @@ export default function ReconciliationClient({ statementId }: { statementId: str
           date: inv.invoice_date || '',
           file_name: inv.file_name || '',
         }))
-        setSearchResults(results)
       }
+
+      // Merge — dedupe by id+type (revenue entries can't collide with invoices since collections differ)
+      const merged = [...invoiceCandidates, ...revenueCandidates]
+      // Sort by closest amount to the transaction
+      merged.sort((a, b) => Math.abs(a.amount - amount) - Math.abs(b.amount - amount))
+      setSearchResults(merged)
     } catch (e) {
-      console.error('Load invoices error:', e)
+      console.error('Load match candidates error:', e)
     }
     setSearching(false)
   }
@@ -622,15 +669,24 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     try {
       const params = new URLSearchParams()
       if (query.length >= 1) params.set('q', query)
+      let amount = 0
+      let isCredit = false
       if (matchModalTx) {
-        const amount = matchModalTx.debit || matchModalTx.credit || 0
+        amount = matchModalTx.debit || matchModalTx.credit || 0
         params.set('amount', String(amount))
         if (!showAllDocs) params.set('type', matchModalTx.debit ? 'debit' : 'credit')
+        isCredit = !!matchModalTx.credit
       }
-      const res = await authFetch(`/api/invoices/search?${params.toString()}`)
-      if (res.ok) {
-        const data = await res.json()
-        const results: MatchCandidate[] = (data.invoices || []).map((inv: any) => ({
+
+      const [invRes, revenueCandidates] = await Promise.all([
+        authFetch(`/api/invoices/search?${params.toString()}`),
+        isCredit || showAllDocs ? fetchRevenueCandidates(amount, query) : Promise.resolve([] as MatchCandidate[]),
+      ])
+
+      let invoiceCandidates: MatchCandidate[] = []
+      if (invRes.ok) {
+        const data = await invRes.json()
+        invoiceCandidates = (data.invoices || []).map((inv: any) => ({
           id: inv.id,
           type: (inv.document_type === 'revenue' || inv.document_type === 'credit_note') ? 'revenue' : inv.type === 'payslip' ? 'invoice' : 'invoice',
           name: inv.supplier_name || inv.file_name || 'Sans nom',
@@ -638,8 +694,13 @@ export default function ReconciliationClient({ statementId }: { statementId: str
           date: inv.invoice_date || '',
           file_name: inv.file_name || '',
         }))
-        setSearchResults(results)
       }
+
+      const merged = [...invoiceCandidates, ...revenueCandidates]
+      if (amount > 0) {
+        merged.sort((a, b) => Math.abs(a.amount - amount) - Math.abs(b.amount - amount))
+      }
+      setSearchResults(merged)
     } catch (e) {
       console.error('Search error:', e)
     }
