@@ -166,7 +166,6 @@ export default function BankClient() {
   const [uploading, setUploading] = useState(false)
   const [uploadProgress, setUploadProgress] = useState(0)
   const [deleteConfirm, setDeleteConfirm] = useState<string | null>(null)
-  const [reconciling, setReconciling] = useState<string | null>(null)
   const [analyzing, setAnalyzing] = useState<string | null>(null)
 
   useEffect(() => {
@@ -408,24 +407,6 @@ export default function BankClient() {
       alert(`Erreur : ${e instanceof Error ? e.message : 'Erreur inconnue'}`)
     }
     setAnalyzing(null)
-  }
-
-  const handleReconcile = async (id: string) => {
-    setReconciling(id)
-    try {
-      const res = await authFetch(`/api/bank-statements/${id}/reconcile`, {
-        method: 'POST',
-      })
-      if (res.ok) {
-        router.push(`/bank/${id}`)
-      } else {
-        console.error('Reconciliation error')
-        setReconciling(null)
-      }
-    } catch (e) {
-      console.error('Reconciliation failed:', e)
-      setReconciling(null)
-    }
   }
 
   const handleDelete = async (id: string) => {
@@ -700,21 +681,6 @@ export default function BankClient() {
                             Analyser
                           </>
                         )}
-                      </button>
-                    )}
-
-                    {st.status === 'parsed' && (
-                      <button
-                        onClick={() => handleReconcile(st.id)}
-                        disabled={reconciling === st.id}
-                        className="btn-primary flex items-center gap-1.5 text-xs disabled:opacity-50"
-                      >
-                        {reconciling === st.id ? (
-                          <Loader2 className="h-3.5 w-3.5 animate-spin" />
-                        ) : (
-                          <Link className="h-3.5 w-3.5" />
-                        )}
-                        Rapprocher
                       </button>
                     )}
 

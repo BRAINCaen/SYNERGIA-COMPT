@@ -84,7 +84,6 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<MatchCandidate[]>([])
   const [searching, setSearching] = useState(false)
-  const [autoReconciling, setAutoReconciling] = useState(false)
   const [rescanning, setRescanning] = useState(false)
   const [rescanProgress, setRescanProgress] = useState<string | null>(null)
   const [txSearch, setTxSearch] = useState('')
@@ -96,8 +95,6 @@ export default function ReconciliationClient({ statementId }: { statementId: str
   const [matchingMulti, setMatchingMulti] = useState(false)
   const [selectedTxIds, setSelectedTxIds] = useState<string[]>([])
   const [multiMatchModal, setMultiMatchModal] = useState(false)
-  const [autoRulePattern, setAutoRulePattern] = useState('')
-  const [createAutoRule, setCreateAutoRule] = useState(false)
   const [showAllDocs, setShowAllDocs] = useState(false)
 
   // Close ignore dropdown on outside click
@@ -235,21 +232,6 @@ export default function ReconciliationClient({ statementId }: { statementId: str
       count: transactions.filter((t) => t.credit != null && t.credit > 0).length,
     },
   ]
-
-  const handleAutoReconcile = async () => {
-    setAutoReconciling(true)
-    try {
-      const res = await authFetch(`/api/bank-statements/${statementId}/reconcile`, {
-        method: 'POST',
-      })
-      if (res.ok) {
-        await fetchData()
-      }
-    } catch (e) {
-      console.error('Auto reconcile error:', e)
-    }
-    setAutoReconciling(false)
-  }
 
   const handleClearAndRescan = async () => {
     if (!confirm('Supprimer TOUTES les transactions de ce releve et re-parser le PDF ?\n\nLes rapprochements existants seront perdus. Le PDF est conserve.')) return
@@ -536,32 +518,8 @@ export default function ReconciliationClient({ statementId }: { statementId: str
     setSearchQuery('')
     setSearchResults([])
     setSelectedCandidateIds([])
-    setCreateAutoRule(false)
     setSearching(true)
 
-    // Auto-detect common pattern in selected transaction labels
-    const selectedLabels = selectedTxIds.map(id => {
-      const tx = transactions.find(t => t.id === id)
-      return (tx?.label || '').toUpperCase()
-    })
-    // Find common prefix
-    if (selectedLabels.length > 1) {
-      let common = selectedLabels[0]
-      for (const label of selectedLabels.slice(1)) {
-        while (common && !label.startsWith(common)) {
-          common = common.substring(0, common.length - 1)
-        }
-      }
-      // Clean up: trim and ensure at least 3 chars
-      common = common.trim()
-      if (common.length >= 3) {
-        setAutoRulePattern(common)
-      } else {
-        setAutoRulePattern('')
-      }
-    } else {
-      setAutoRulePattern(selectedLabels[0]?.substring(0, 20) || '')
-    }
     // Load invoices sorted by total amount of selected transactions
     const totalAmount = selectedTxIds.reduce((sum, id) => {
       const tx = transactions.find(t => t.id === id)
@@ -867,18 +825,6 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                 <Trash2 className="h-4 w-4" />
               )}
               {rescanning ? (rescanProgress || 'Re-scan...') : 'Vider + re-scanner'}
-            </button>
-            <button
-              onClick={handleAutoReconcile}
-              disabled={autoReconciling}
-              className="btn-primary flex items-center gap-2 disabled:opacity-50"
-            >
-              {autoReconciling ? (
-                <Loader2 className="h-4 w-4 animate-spin" />
-              ) : (
-                <Link className="h-4 w-4" />
-              )}
-              Lancer le rapprochement auto
             </button>
           </div>
         </div>
@@ -1530,24 +1476,6 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                           })
                         }
                       }
-                      // Create auto-match rule if checked
-                      if (createAutoRule && autoRulePattern.trim() && selectedCandidateIds.length === 1) {
-                        const c = searchResults.find(r => r.id === selectedCandidateIds[0])
-                        if (c) {
-                          await authFetch('/api/auto-match-rules', {
-                            method: 'POST',
-                            headers: { 'Content-Type': 'application/json' },
-                            body: JSON.stringify({
-                              pattern: autoRulePattern.trim(),
-                              match_type: 'contains',
-                              document_id: c.id,
-                              document_type: c.type,
-                              document_name: c.name || c.file_name,
-                              description: `"${autoRulePattern.trim()}" → ${c.name || c.file_name}`,
-                            }),
-                          })
-                        }
-                      }
                       setMultiMatchModal(false)
                       setSelectedTxIds([])
                       setSelectedCandidateIds([])
@@ -1563,32 +1491,6 @@ export default function ReconciliationClient({ statementId }: { statementId: str
                 </button>
               )}
 
-              {/* Auto-rule option */}
-              {autoRulePattern && (
-                <div className="border-t border-dark-border pt-3">
-                  <label className="flex items-start gap-2 cursor-pointer">
-                    <input
-                      type="checkbox"
-                      checked={createAutoRule}
-                      onChange={() => setCreateAutoRule(!createAutoRule)}
-                      className="mt-0.5 h-4 w-4 rounded border-dark-border bg-dark-input text-accent-orange focus:ring-accent-orange/50"
-                    />
-                    <div>
-                      <p className="text-xs font-medium text-accent-orange">Creer une regle automatique</p>
-                      <p className="text-xs text-gray-500">
-                        Les prochains mois, les transactions contenant
-                        <input
-                          type="text"
-                          value={autoRulePattern}
-                          onChange={(e) => setAutoRulePattern(e.target.value)}
-                          className="mx-1 inline-block w-32 rounded border border-dark-border bg-dark-input px-1.5 py-0.5 text-xs font-mono text-accent-orange focus:border-accent-orange focus:outline-none"
-                        />
-                        seront automatiquement pointees avec ce document.
-                      </p>
-                    </div>
-                  </label>
-                </div>
-              )}
             </div>
           </div>
         </div>
