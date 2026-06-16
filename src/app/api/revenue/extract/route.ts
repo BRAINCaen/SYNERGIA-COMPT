@@ -1,6 +1,45 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import anthropic, { CLASSIFICATION_MODEL, MAX_TOKENS } from '@/lib/anthropic'
+import * as XLSX from 'xlsx'
+
+/**
+ * Extract the first complete JSON object from a Claude response, even if it
+ * contains commentary, multiple objects, or markdown fencing. Throws on no JSON.
+ */
+function extractFirstJsonObject(raw: string): unknown {
+  let text = raw.trim()
+  // Strip ```json ... ``` fences
+  if (text.startsWith('```')) {
+    text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
+  }
+  // Direct parse — works when the model returns clean JSON
+  try {
+    return JSON.parse(text)
+  } catch { /* fall through */ }
+  // Find first { ... } balanced object
+  const start = text.indexOf('{')
+  if (start < 0) throw new Error('Aucun JSON trouve dans la reponse IA')
+  let depth = 0
+  let inString = false
+  let escape = false
+  for (let i = start; i < text.length; i++) {
+    const c = text[i]
+    if (escape) { escape = false; continue }
+    if (c === '\\') { escape = true; continue }
+    if (c === '"') { inString = !inString; continue }
+    if (inString) continue
+    if (c === '{') depth++
+    else if (c === '}') {
+      depth--
+      if (depth === 0) {
+        const slice = text.slice(start, i + 1)
+        return JSON.parse(slice)
+      }
+    }
+  }
+  throw new Error('JSON malforme dans la reponse IA')
+}
 
 export const dynamic = 'force-dynamic'
 
@@ -71,10 +110,23 @@ Règles :
           textContent = new TextDecoder('iso-8859-1').decode(buffer)
         }
       } else {
-        textContent = `[Fichier Excel: ${file.name}] — Contenu binaire non lisible directement. Voici les premiers octets en base64 pour référence.`
+        // Excel : parse en CSV via xlsx pour que Claude puisse lire le contenu
+        try {
+          const workbook = XLSX.read(buffer, { type: 'buffer' })
+          const sheets: string[] = []
+          for (const sheetName of workbook.SheetNames) {
+            const sheet = workbook.Sheets[sheetName]
+            const csv = XLSX.utils.sheet_to_csv(sheet, { FS: ';', blankrows: false })
+            if (csv.trim()) sheets.push(`=== Feuille : ${sheetName} ===\n${csv}`)
+          }
+          textContent = sheets.join('\n\n')
+        } catch (e) {
+          console.error('Excel parse error:', e)
+          textContent = `[Echec lecture Excel: ${file.name}]`
+        }
       }
       content = [
-        { type: 'text', text: `Voici un fichier CSV/tableur d'encaissements :\n\n${textContent.slice(0, 15000)}\n\n${prompt}` },
+        { type: 'text', text: `Voici un fichier ${isCsv ? 'CSV' : 'Excel converti en CSV'} d'encaissements :\n\n${textContent.slice(0, 30000)}\n\n${prompt}` },
       ]
     } else if (isImage) {
       // For images: send as image
@@ -119,12 +171,7 @@ Règles :
       return NextResponse.json({ error: 'Pas de reponse IA' }, { status: 500 })
     }
 
-    let jsonText = textBlock.text.trim()
-    if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-    }
-
-    const data = JSON.parse(jsonText)
+    const data = extractFirstJsonObject(textBlock.text)
     return NextResponse.json({ success: true, data })
   } catch (error) {
     console.error('Extract revenue error:', error)
