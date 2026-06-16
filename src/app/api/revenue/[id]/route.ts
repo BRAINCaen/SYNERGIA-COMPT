@@ -45,6 +45,14 @@ export async function GET(
   }
 }
 
+// PATCH is an alias for PUT — both accept partial updates.
+export async function PATCH(
+  request: NextRequest,
+  ctx: { params: { id: string } }
+) {
+  return PUT(request, ctx)
+}
+
 export async function PUT(
   request: NextRequest,
   { params }: { params: { id: string } }
