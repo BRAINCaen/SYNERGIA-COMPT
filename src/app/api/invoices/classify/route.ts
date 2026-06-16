@@ -6,6 +6,7 @@ import { findKnownSupplier, AMORTIZATION_RATES } from '@/data/boehme-suppliers'
 import { getCorrectionsForSupplier } from '@/lib/audit'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import { adminDb } from '@/lib/firebase/admin'
+import { extractFirstJsonObject } from '@/lib/json-extract'
 
 export const dynamic = 'force-dynamic'
 
@@ -239,12 +240,7 @@ export async function POST(request: NextRequest) {
         return NextResponse.json({ success: false, error: "Pas de réponse de l'IA" }, { status: 500 })
       }
 
-      let jsonText = textBlock.text.trim()
-      if (jsonText.startsWith('```')) {
-        jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-      }
-
-      const result = JSON.parse(jsonText)
+      const result = extractFirstJsonObject(textBlock.text) as Record<string, unknown>
       return NextResponse.json({
         success: true,
         classification: {
@@ -279,9 +275,7 @@ export async function POST(request: NextRequest) {
       if (!textBlock || textBlock.type !== 'text') {
         return NextResponse.json({ success: false, error: "Pas de réponse de l'IA" }, { status: 500 })
       }
-      let jsonText = textBlock.text.trim()
-      if (jsonText.startsWith('```')) jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-      const classifications: ClassificationResult[] = JSON.parse(jsonText)
+      const classifications = extractFirstJsonObject(textBlock.text) as ClassificationResult[]
       classifications.forEach(c => { c.classification_method = 'ai' })
       return NextResponse.json({ success: true, classifications, questions: [] })
     }
@@ -414,12 +408,7 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    let jsonText = textBlock.text.trim()
-    if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-    }
-
-    const classifications: ClassificationResult[] = JSON.parse(jsonText)
+    const classifications = extractFirstJsonObject(textBlock.text) as ClassificationResult[]
 
     // Post-process: enforce immobilization threshold
     for (const c of classifications) {

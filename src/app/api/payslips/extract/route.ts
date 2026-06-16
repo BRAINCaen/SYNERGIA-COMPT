@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import anthropic, { CLASSIFICATION_MODEL, MAX_TOKENS } from '@/lib/anthropic'
+import { extractFirstJsonObject } from '@/lib/json-extract'
 
 export const dynamic = 'force-dynamic'
 
@@ -73,12 +74,7 @@ Montants en nombres avec point décimal (1234.56). advance_amount = 0 si aucun a
       return NextResponse.json({ error: 'Pas de réponse IA' }, { status: 500 })
     }
 
-    let jsonText = textBlock.text.trim()
-    if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-    }
-
-    const data = JSON.parse(jsonText)
+    const data = extractFirstJsonObject(textBlock.text)
     return NextResponse.json({ success: true, data })
   } catch (error) {
     console.error('Extract payslip error:', error)

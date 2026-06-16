@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server'
 import anthropic, { EXTRACTION_MODEL, MAX_TOKENS } from '@/lib/anthropic'
 import type { RawExtraction } from '@/types'
+import { extractFirstJsonObject } from '@/lib/json-extract'
 
 export const runtime = 'edge'
 export const dynamic = 'force-dynamic'
@@ -176,13 +177,8 @@ export async function POST(request: NextRequest) {
       )
     }
 
-    // Parse JSON from response (handle potential markdown code blocks)
-    let jsonText = textBlock.text.trim()
-    if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-    }
-
-    const extraction: RawExtraction = JSON.parse(jsonText)
+    // Robust JSON extraction — tolerates LLM preamble like "Je dois analyser..."
+    const extraction = extractFirstJsonObject(textBlock.text) as RawExtraction
 
     return NextResponse.json({ success: true, data: extraction })
   } catch (error) {

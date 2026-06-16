@@ -3,6 +3,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import anthropic, { CLASSIFICATION_MODEL, MAX_TOKENS } from '@/lib/anthropic'
 import { BOEHME_PCG } from '@/data/boehme-pcg'
+import { extractFirstJsonObject } from '@/lib/json-extract'
 
 const ALL_PCG_JSON = JSON.stringify(
   BOEHME_PCG.map(a => ({ code: a.code, label: a.label, category: a.category })),
@@ -99,12 +100,7 @@ Reponds UNIQUEMENT avec ce JSON (pas de texte autour) :
       return NextResponse.json({ error: 'Pas de reponse textuelle' }, { status: 500 })
     }
 
-    let jsonText = textBlock.text.trim()
-    if (jsonText.startsWith('```')) {
-      jsonText = jsonText.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-    }
-
-    const parsed = JSON.parse(jsonText)
+    const parsed = extractFirstJsonObject(textBlock.text) as { alternatives?: unknown[] }
     return NextResponse.json({ success: true, alternatives: parsed.alternatives || [] })
   } catch (error) {
     console.error('Suggest alternatives error:', error)

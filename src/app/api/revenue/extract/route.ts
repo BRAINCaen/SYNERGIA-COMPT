@@ -2,44 +2,7 @@ import { NextRequest, NextResponse } from 'next/server'
 import { verifyAuth } from '@/lib/firebase/auth-helper'
 import anthropic, { CLASSIFICATION_MODEL, MAX_TOKENS } from '@/lib/anthropic'
 import * as XLSX from 'xlsx'
-
-/**
- * Extract the first complete JSON object from a Claude response, even if it
- * contains commentary, multiple objects, or markdown fencing. Throws on no JSON.
- */
-function extractFirstJsonObject(raw: string): unknown {
-  let text = raw.trim()
-  // Strip ```json ... ``` fences
-  if (text.startsWith('```')) {
-    text = text.replace(/^```(?:json)?\n?/, '').replace(/\n?```$/, '')
-  }
-  // Direct parse — works when the model returns clean JSON
-  try {
-    return JSON.parse(text)
-  } catch { /* fall through */ }
-  // Find first { ... } balanced object
-  const start = text.indexOf('{')
-  if (start < 0) throw new Error('Aucun JSON trouve dans la reponse IA')
-  let depth = 0
-  let inString = false
-  let escape = false
-  for (let i = start; i < text.length; i++) {
-    const c = text[i]
-    if (escape) { escape = false; continue }
-    if (c === '\\') { escape = true; continue }
-    if (c === '"') { inString = !inString; continue }
-    if (inString) continue
-    if (c === '{') depth++
-    else if (c === '}') {
-      depth--
-      if (depth === 0) {
-        const slice = text.slice(start, i + 1)
-        return JSON.parse(slice)
-      }
-    }
-  }
-  throw new Error('JSON malforme dans la reponse IA')
-}
+import { extractFirstJsonObject } from '@/lib/json-extract'
 
 export const dynamic = 'force-dynamic'
 
